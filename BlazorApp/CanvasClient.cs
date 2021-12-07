@@ -25,26 +25,26 @@ namespace BlazorApp
 
         public async Task DrawMatAsync(Mat mat)
         {
-            Mat? bgra = null;
+            Mat? rgba = null;
             try
             {
                 var type = mat.Type();
                 if (type == MatType.CV_8UC1)
-                    bgra = mat.CvtColor(ColorConversionCodes.GRAY2RGBA);
+                    rgba = mat.CvtColor(ColorConversionCodes.GRAY2RGBA);
                 else if (type == MatType.CV_8UC3)
-                    bgra = mat.CvtColor(ColorConversionCodes.BGR2RGBA);
+                    rgba = mat.CvtColor(ColorConversionCodes.BGR2RGBA);
                 else
                     throw new ArgumentException($"Invalid mat type ({mat.Type()})");
 
-                var length = (int)(bgra.DataEnd.ToInt64() - bgra.DataStart.ToInt64());
+                var length = (int)(rgba.DataEnd.ToInt64() - rgba.DataStart.ToInt64());
                 var pixelBytes = new byte[length];
-                Marshal.Copy(bgra.DataStart, pixelBytes, 0, length);
+                Marshal.Copy(rgba.DataStart, pixelBytes, 0, length);
 
                 await DrawPixelsAsync(pixelBytes);
             }
             finally
             {
-                bgra?.Dispose();
+                rgba?.Dispose();
             }
         }
     }
