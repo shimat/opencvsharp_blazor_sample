@@ -1,8 +1,4 @@
-# opencvsharp_samples
+# opencvsharp_blazor_sample
 
-Code samples of https://github.com/shimat/opencvsharp
+[OpenCvSharp](https://github.com/shimat/opencvsharp) + Blzor WebAssembly Code Samples
 
-- `SamplesCore` C# (.NET Core / .NET Framework) samples
-- `SamplesVB`  VB.NET samples
-- `SampleBase` 	common library
-- `CameraOpenCV`  UWP sample
