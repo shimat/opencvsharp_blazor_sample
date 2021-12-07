@@ -36,6 +36,8 @@ namespace BlazorApp
                 else
                     throw new ArgumentException($"Invalid mat type ({mat.Type()})");
 
+                if (!rgba.IsContinuous())
+                    throw new InvalidOperationException("RGBA Mat should be continuous.");
                 var length = (int)(rgba.DataEnd.ToInt64() - rgba.DataStart.ToInt64());
                 var pixelBytes = new byte[length];
                 Marshal.Copy(rgba.DataStart, pixelBytes, 0, length);
