@@ -1,13 +1,15 @@
-﻿@page "/"
+@page "/"
 
-@using OpenCvSharp
+<PageTitle>OpenCvSharp Blazor Sample</PageTitle>
 
-<PageTitle>Index</PageTitle>
+<h1>OpenCvSharp + Blazor WebAssembly</h1>
 
-<h1>Hello, world!</h1>
+<p>
+    Code samples showing <a href="https://github.com/shimat/opencvsharp" target="_blank">OpenCvSharp</a>
+    running entirely in the browser via Blazor WebAssembly - no server-side processing involved.
+</p>
 
-Welcome to your new app.
-
-<pre>@OpenCvSharp.Cv2.GetBuildInformation()</pre>
-
-<SurveyPrompt Title="How is Blazor working for you?" />
+<ul>
+    <li><a href="opencvsharp_sample">OpenCvSharp Sample</a> - load an image and run a few OpenCV operations (grayscale, pseudo-color, threshold, edge detection, keypoint detection) on it</li>
+    <li><a href="build-info">Build Info</a> - the OpenCV build compiled into this app's WebAssembly binary</li>
+</ul>
