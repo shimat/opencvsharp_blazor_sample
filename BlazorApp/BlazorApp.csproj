@@ -18,10 +18,7 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-    <!-- AOT-compiling OpenCvSharp.dll currently crashes mono-aot-cross with a native GC assertion
-         (sgen-alloc.c:409) on the current wasm-tools workload, on both net8.0 and net10.0. Leave
-         AOT off for Release until that's fixed upstream; pass -p:RunAOTCompilation=true to retry. -->
-    <RunAOTCompilation>False</RunAOTCompilation>
+    <RunAOTCompilation>True</RunAOTCompilation>
   </PropertyGroup>
 
   <ItemGroup>
@@ -68,5 +65,31 @@
     <WasmOptConfigurationFlags Include="--enable-sign-ext" />
     <WasmOptConfigurationFlags Include="--enable-threads" />
   </ItemGroup>
+
+  <!--
+    Workaround: AOT-compiling OpenCvSharp.dll crashes mono-aot-cross (sgen-alloc.c:409) once its
+    P/Invoke surface is large (~3100 LibraryImport declarations) - confirmed via a minimal repro
+    that this is unrelated to native lib size or NativeFileReference itself (see
+    shimat/opencvsharp_blazor_sample issue 8). The actual OpenCV computation happens in native
+    C++ regardless of whether this thin C# marshalling layer is AOT'd or interpreted, so
+    excluding just this one assembly from AOT (it still ships as plain IL, executed by the
+    interpreter) dodges the crash while the rest of the app still gets AOT'd. This shadows the
+    SDK's internal "_WasmAotCompileApp" target, so its name/shape may change between SDK versions
+    - if a future SDK update breaks this, fall back to <RunAOTCompilation>False</RunAOTCompilation>
+    for Release.
+  -->
+  <Target Name="ExcludeOpenCvSharpFromAOT" BeforeTargets="_WasmAotCompileApp" Condition="'$(_WasmShouldAOT)' == 'true'">
+    <ItemGroup>
+      <_OpenCvSharpAssemblyToSkipAOT Include="@(_WasmAssembliesInternal)" Condition="'%(FileName)' == 'OpenCvSharp'" />
+      <_WasmAssembliesInternal Remove="@(_OpenCvSharpAssemblyToSkipAOT)" />
+    </ItemGroup>
+    <Message Importance="High" Text="Excluding from AOT: @(_OpenCvSharpAssemblyToSkipAOT)" />
+  </Target>
+
+  <Target Name="ReAddOpenCvSharpAfterAOT" AfterTargets="_WasmAotCompileApp" Condition="'$(_WasmShouldAOT)' == 'true'">
+    <ItemGroup>
+      <_WasmAssembliesInternal Include="@(_OpenCvSharpAssemblyToSkipAOT)" />
+    </ItemGroup>
+  </Target>
 
 </Project>
