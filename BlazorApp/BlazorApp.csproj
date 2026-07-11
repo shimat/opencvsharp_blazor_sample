@@ -69,4 +69,27 @@
     <WasmOptConfigurationFlags Include="--enable-threads" />
   </ItemGroup>
 
+  <!--
+    Experiment: AOT-compiling OpenCvSharp.dll crashes mono-aot-cross (sgen-alloc.c:409) once its
+    P/Invoke surface is large (~3100 LibraryImport declarations) - confirmed unrelated to native
+    lib size or NativeFileReference itself. The actual OpenCV computation happens in native C++
+    regardless of whether this thin C# marshalling layer is AOT'd or interpreted, so excluding
+    just this one assembly from AOT (it still ships as plain IL, executed by the interpreter)
+    should dodge the crash while the rest of the app still gets AOT'd. Requires shadowing the
+    SDK's internal "_WasmAotCompileApp" target (name/shape may change between SDK versions).
+  -->
+  <Target Name="ExcludeOpenCvSharpFromAOT" BeforeTargets="_WasmAotCompileApp" Condition="'$(_WasmShouldAOT)' == 'true'">
+    <ItemGroup>
+      <_OpenCvSharpAssemblyToSkipAOT Include="@(_WasmAssembliesInternal)" Condition="'%(FileName)' == 'OpenCvSharp'" />
+      <_WasmAssembliesInternal Remove="@(_OpenCvSharpAssemblyToSkipAOT)" />
+    </ItemGroup>
+    <Message Importance="High" Text="Excluding from AOT: @(_OpenCvSharpAssemblyToSkipAOT)" />
+  </Target>
+
+  <Target Name="ReAddOpenCvSharpAfterAOT" AfterTargets="_WasmAotCompileApp" Condition="'$(_WasmShouldAOT)' == 'true'">
+    <ItemGroup>
+      <_WasmAssembliesInternal Include="@(_OpenCvSharpAssemblyToSkipAOT)" />
+    </ItemGroup>
+  </Target>
+
 </Project>

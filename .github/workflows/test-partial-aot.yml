@@ -1,0 +1,37 @@
+name: Test partial AOT (exclude OpenCvSharp.dll only)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ experiment/partial-aot-exclude-opencvsharp ]
+
+jobs:
+  test-partial-aot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.3xx'
+
+      - name: Install wasm-tools workload
+        run: dotnet workload install wasm-tools
+
+      - name: Swap in binaryen version_130 wasm-opt (dotnet/runtime#114723 workaround)
+        run: |
+          set -euo pipefail
+          WASM_OPT_PATH=$(find /usr/share/dotnet/packs -type f -name 'wasm-opt' | head -1)
+          curl -sSL -o binaryen.tar.gz "https://github.com/WebAssembly/binaryen/releases/download/version_130/binaryen-version_130-x86_64-linux.tar.gz"
+          echo "0a18362361ad05465118cd8eeb72edaeec89de6894bc283576ef4e07aa3babcc  binaryen.tar.gz" | sha256sum -c -
+          tar xzf binaryen.tar.gz
+          cp "binaryen-version_130/bin/wasm-opt" "$WASM_OPT_PATH"
+
+      - name: Restore
+        run: dotnet restore BlazorApp/BlazorApp.csproj
+
+      - name: Publish (Release, AOT on, OpenCvSharp.dll excluded from AOT)
+        run: dotnet publish BlazorApp/BlazorApp.csproj -c Release -p:RunAOTCompilation=true
+
+      - name: Confirm OpenCvSharp.dll actually shipped (not silently dropped)
+        run: find BlazorApp/bin/Release/net10.0/publish -iname 'OpenCvSharp*' -o -iname 'BlazorApp.dll' | sort
