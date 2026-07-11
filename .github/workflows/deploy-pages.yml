@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, experiment/partial-aot-exclude-opencvsharp ]
   workflow_dispatch:
 
 permissions:
