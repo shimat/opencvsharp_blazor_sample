@@ -29,10 +29,11 @@ namespace BlazorApp
             try
             {
                 var type = mat.Type();
+                rgba = new Mat();
                 if (type == MatType.CV_8UC1)
-                    rgba = mat.CvtColor(ColorConversionCodes.GRAY2RGBA);
+                    Cv2.CvtColor(mat, rgba, ColorConversionCodes.GRAY2RGBA);
                 else if (type == MatType.CV_8UC3)
-                    rgba = mat.CvtColor(ColorConversionCodes.BGR2RGBA);
+                    Cv2.CvtColor(mat, rgba, ColorConversionCodes.BGR2RGBA);
                 else
                     throw new ArgumentException($"Invalid mat type ({mat.Type()})");
 
