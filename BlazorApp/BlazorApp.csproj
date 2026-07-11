@@ -50,13 +50,13 @@
   </Target>
 
   <!--
-    The wasm-opt bundled with the current wasm-tools workload (v117) predates binaryen PR #7106
-    (bulk-memory-opt / call-indirect-overlong, added in v121) - see dotnet/runtime#114723. emcc's
-    own internal link-time wasm-opt pass enables the full modern feature set and produces opcodes
-    (e.g. nontrapping-float-to-int from libwebp) that this second, SDK-driven wasm-opt pass then
-    rejects because its flag set doesn't match. This only matters once wasm-opt itself is new
-    enough to accept "--enable-bulk-memory-opt" (see the CI publish workflow, which swaps in a
-    newer build) - harmless otherwise since Debug builds don't invoke this optimization pass.
+    The wasm-opt bundled with the current wasm-tools workload (v117) predates binaryen PR 7106
+    (bulk-memory-opt / call-indirect-overlong, added in v121) - see dotnet/runtime issue 114723.
+    emcc's own internal link-time wasm-opt pass enables the full modern feature set and produces
+    opcodes (e.g. nontrapping-float-to-int from libwebp) that this second, SDK-driven wasm-opt
+    pass then rejects because its flag set doesn't match. This only matters once wasm-opt itself
+    is new enough to accept the newer enable flags (see the CI publish workflow, which swaps in
+    a newer build); harmless otherwise since Debug builds don't invoke this optimization pass.
   -->
   <ItemGroup Condition="'$(WasmBuildNative)' == 'true'">
     <WasmOptConfigurationFlags Include="--enable-nontrapping-float-to-int" />
