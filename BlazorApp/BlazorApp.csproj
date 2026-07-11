@@ -1,11 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
 
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <WasmBuildNative>true</WasmBuildNative>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Without trimming, the linker sees every P/Invoke declared in OpenCvSharp.dll (including
+         modules the wasm native lib doesn't build, e.g. text/dnn), not just the ones this app
+         calls. Allow those to stay unresolved; they only fail if actually invoked at runtime. -->
+    <WasmAllowUndefinedSymbols>true</WasmAllowUndefinedSymbols>
+    <WasmInitialHeapSize>134217728</WasmInitialHeapSize>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
@@ -17,10 +22,28 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="6.0.1" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="6.0.1" PrivateAssets="all" />
-    <PackageReference Include="OpenCvSharp4" Version="4.5.5.20211231" />
-    <PackageReference Include="OpenCvSharp4.runtime.wasm" Version="4.5.5.20211231" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.9" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.9" PrivateAssets="all" />
+    <PackageReference Include="OpenCvSharp5" Version="5.0.0.20260703" />
+    <PackageReference Include="OpenCvSharp5.runtime.wasm" Version="5.0.0.20260703" />
   </ItemGroup>
+
+  <!--
+    Workaround: OpenCvSharp5.runtime.wasm ships "libOpenCvSharpExtern.a", but the managed side
+    declares [LibraryImport("OpenCvSharpExtern")] (no "lib" prefix). The wasm toolchain derives the
+    P/Invoke module name from the native file's name verbatim (MSBuild %(Filename)), so this
+    mismatch leaves the generated P/Invoke table empty and every native call throws
+    DllNotFoundException at runtime. Re-reference a locally renamed copy so the names line up.
+  -->
+  <Target Name="FixOpenCvSharpWasmNativeLibName" BeforeTargets="_PrepareForBrowserWasmBuildNative">
+    <ItemGroup>
+      <_OpenCvSharpWasmNativeSrc Include="@(NativeFileReference)" Condition="'%(Filename)' == 'libOpenCvSharpExtern'" />
+      <NativeFileReference Remove="@(_OpenCvSharpWasmNativeSrc)" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_OpenCvSharpWasmNativeSrc)" DestinationFiles="$(IntermediateOutputPath)OpenCvSharpExtern.a" SkipUnchangedFiles="true" Condition="'@(_OpenCvSharpWasmNativeSrc)' != ''" />
+    <ItemGroup>
+      <NativeFileReference Include="$(IntermediateOutputPath)OpenCvSharpExtern.a" Condition="'@(_OpenCvSharpWasmNativeSrc)' != ''" />
+    </ItemGroup>
+  </Target>
 
 </Project>
