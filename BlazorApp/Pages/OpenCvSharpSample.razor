@@ -1,5 +1,6 @@
 ﻿@page "/opencvsharp_sample"
 @using OpenCvSharp
+@using OpenCvSharp.XFeatures2D
 @inject IJSRuntime jsRuntime;
 @inject HttpClient httpClient;
 @implements IDisposable
@@ -126,7 +127,7 @@
 
         using var akaze = AKAZE.Create();
         using var descriptors = new Mat();
-        akaze.DetectAndCompute(grayMat, null, out var keypoints, descriptors);
+        akaze.DetectAndCompute(grayMat, default, out var keypoints, descriptors);
 
         using var dstMat = srcMat.Clone();
         Cv2.DrawKeypoints(srcMat, keypoints, dstMat);
