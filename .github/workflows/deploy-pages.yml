@@ -1,0 +1,71 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  # dotnet/runtime#114723: the wasm-opt bundled with the current wasm-tools workload predates
+  # binaryen PR #7106 (bulk-memory-opt / call-indirect-overlong), so Release publish fails.
+  # Swap in a newer binaryen build before publishing. Bump these together when updating.
+  BINARYEN_VERSION: version_130
+  BINARYEN_SHA256: 0a18362361ad05465118cd8eeb72edaeec89de6894bc283576ef4e07aa3babcc
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.3xx'
+
+      - name: Install wasm-tools workload
+        run: dotnet workload install wasm-tools
+
+      - name: Work around outdated bundled wasm-opt (dotnet/runtime#114723)
+        run: |
+          set -euo pipefail
+          WASM_OPT_PATH=$(find /usr/share/dotnet/packs -type f -name 'wasm-opt' | head -1)
+          echo "Patching: $WASM_OPT_PATH"
+          curl -sSL -o binaryen.tar.gz "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz"
+          echo "${BINARYEN_SHA256}  binaryen.tar.gz" | sha256sum -c -
+          tar xzf binaryen.tar.gz
+          cp "binaryen-${BINARYEN_VERSION}/bin/wasm-opt" "$WASM_OPT_PATH"
+          "$WASM_OPT_PATH" --version
+
+      - name: Publish
+        run: dotnet publish BlazorApp/BlazorApp.csproj -c Release -o publish-output
+
+      - name: Rewrite base href for the GitHub Pages project subpath
+        run: sed -i "s|<base href=\"/\" />|<base href=\"/${{ github.event.repository.name }}/\" />|" publish-output/wwwroot/index.html
+
+      - name: Add GitHub Pages SPA fallback
+        run: |
+          touch publish-output/wwwroot/.nojekyll
+          cp publish-output/wwwroot/index.html publish-output/wwwroot/404.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: publish-output/wwwroot
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
