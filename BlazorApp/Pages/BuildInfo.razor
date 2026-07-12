@@ -1,0 +1,10 @@
+@page "/build-info"
+@using OpenCvSharp
+
+<PageTitle>Build Info</PageTitle>
+
+<h1>OpenCV Build Information</h1>
+
+<p>Output of <code>Cv2.GetBuildInformation()</code>, reported by the OpenCV build compiled into this app's WebAssembly binary.</p>
+
+<pre>@Cv2.GetBuildInformation()</pre>

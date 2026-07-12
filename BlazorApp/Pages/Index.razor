@@ -1,13 +1,18 @@
-﻿@page "/"
+@page "/"
 
-@using OpenCvSharp
+<PageTitle>OpenCvSharp Blazor Sample</PageTitle>
 
-<PageTitle>Index</PageTitle>
+<h1>OpenCvSharp + Blazor WebAssembly</h1>
 
-<h1>Hello, world!</h1>
+<p>
+    Code samples showing <a href="https://github.com/shimat/opencvsharp" target="_blank">OpenCvSharp</a>
+    running entirely in the browser via Blazor WebAssembly - no server-side processing involved.
+</p>
 
-Welcome to your new app.
-
-<pre>@OpenCvSharp.Cv2.GetBuildInformation()</pre>
-
-<SurveyPrompt Title="How is Blazor working for you?" />
+<ul>
+    <li><a href="build-info">Build Info</a> - the OpenCV build compiled into this app's WebAssembly binary</li>
+    <li><a href="opencvsharp_sample">Filters</a> - load an image and run a few basic OpenCV operations (pseudo-color, threshold, edge detection) on it</li>
+    <li><a href="samples/features">Keypoints &amp; Matching</a> - AKAZE keypoint detection and feature matching between two images</li>
+    <li><a href="samples/detection">Live Face Detection</a> - real-time face detection against a live webcam feed</li>
+    <li><a href="samples/interactive">GrabCut Segmentation</a> - drag a rectangle to extract the foreground from an image</li>
+</ul>

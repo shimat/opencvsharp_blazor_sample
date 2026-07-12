@@ -1,0 +1,171 @@
+@page "/samples/detection"
+@using OpenCvSharp
+@inject IJSRuntime jsRuntime
+@inject HttpClient httpClient
+@implements IAsyncDisposable
+
+<PageTitle>Live Face Detection</PageTitle>
+
+<h1>Live Face Detection</h1>
+
+<p>
+    Grants access to your webcam and runs a Haar cascade face detector against the live video,
+    entirely in the browser - nothing is uploaded anywhere.
+</p>
+
+<div style="border:1px solid #e0a800; background:#fff3cd; color:#664d03; padding:0.75rem 1rem; border-radius:4px; margin-bottom:1rem;">
+    <strong>Known issue:</strong> face detection currently crashes on this WebAssembly build.
+    <code>CascadeClassifier.DetectMultiScale</code> internally probes for OpenCL support via
+    <code>cv::UMat</code>, and that probe throws instead of cleanly reporting "unavailable" on
+    this build, aborting the WASM runtime. This is an upstream OpenCV WASM build issue (missing
+    <code>-DWITH_OPENCL=OFF</code> at build time), not something fixable from this sample - see
+    <a href="https://github.com/shimat/opencvsharp/issues/2037" target="_blank">shimat/opencvsharp#2037</a>
+    for details. The page is kept here as a preview of the intended feature, pending an upstream fix.
+</div>
+
+<video @ref="videoElement" autoplay muted playsinline style="display:none"></video>
+<canvas @ref="captureCanvas" style="display:none"></canvas>
+<canvas @ref="resultCanvas" width="480" height="360" style="border:1px solid gray;"></canvas>
+
+<div>
+    <button @onclick="StartAsync" disabled="@running">Start</button>
+    <button @onclick="StopAsync" disabled="@(!running)">Stop</button>
+</div>
+<p>@statusMessage</p>
+
+@code {
+    private const int FrameWidth = 480;
+    private const int FrameHeight = 360;
+
+    private ElementReference videoElement;
+    private ElementReference captureCanvas;
+    private ElementReference resultCanvas;
+    private WebcamClient? webcamClient;
+    private CanvasClient? resultCanvasClient;
+    private CascadeClassifier? cascade;
+    private CancellationTokenSource? cts;
+    private Task? loopTask;
+    private bool running;
+    private string statusMessage = "";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        webcamClient ??= new WebcamClient(jsRuntime, videoElement, captureCanvas);
+        resultCanvasClient ??= new CanvasClient(jsRuntime, resultCanvas);
+    }
+
+    private async Task EnsureCascadeLoadedAsync()
+    {
+        if (cascade is not null)
+            return;
+
+        var bytes = await httpClient.GetByteArrayAsync("models/haarcascade_frontalface_default.xml");
+        const string path = "haarcascade_frontalface_default.xml";
+        await File.WriteAllBytesAsync(path, bytes);
+        cascade = new CascadeClassifier(path);
+    }
+
+    private async Task StartAsync()
+    {
+        if (running || webcamClient is null)
+            return;
+
+        running = true;
+        statusMessage = "Requesting camera access...";
+        try
+        {
+            await EnsureCascadeLoadedAsync();
+            await webcamClient.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"Couldn't start the camera: {ex.Message}";
+            running = false;
+            return;
+        }
+
+        statusMessage = "";
+        cts = new CancellationTokenSource();
+        loopTask = RunLoopAsync(cts.Token);
+    }
+
+    private async Task StopAsync()
+    {
+        if (!running)
+            return;
+
+        running = false;
+        cts?.Cancel();
+
+        if (webcamClient is not null)
+            await webcamClient.StopAsync();
+    }
+
+    private async Task RunLoopAsync(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                await CaptureAndDetectOnceAsync();
+            }
+            catch
+            {
+                // Ignore a transient capture/detection failure and keep the loop alive.
+            }
+
+            try
+            {
+                await Task.Delay(250, token);
+            }
+            catch (TaskCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
+    private async Task CaptureAndDetectOnceAsync()
+    {
+        if (webcamClient is null || resultCanvasClient is null || cascade is null)
+            return;
+
+        var jpegBytes = await webcamClient.CaptureFrameAsync();
+        if (jpegBytes.Length == 0)
+            return;
+
+        using var rawMat = Mat.FromImageData(jpegBytes);
+        using var colorMat = new Mat();
+        Cv2.Resize(rawMat, colorMat, new Size(FrameWidth, FrameHeight));
+
+        using var grayMat = new Mat();
+        Cv2.CvtColor(colorMat, grayMat, ColorConversionCodes.BGR2GRAY);
+
+        var faces = cascade.DetectMultiScale(grayMat);
+        foreach (var face in faces)
+        {
+            Cv2.Rectangle(colorMat, face, Scalar.LimeGreen, thickness: 3);
+        }
+
+        await resultCanvasClient.DrawMatAsync(colorMat);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        cts?.Cancel();
+        if (running && webcamClient is not null)
+        {
+            await webcamClient.StopAsync();
+            running = false;
+        }
+        if (loopTask is not null)
+            await loopTask;
+        cascade?.Dispose();
+        cts?.Dispose();
+    }
+}
