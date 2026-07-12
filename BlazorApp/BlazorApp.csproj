@@ -17,8 +17,16 @@
     <RunAOTCompilation>True</RunAOTCompilation>
   </PropertyGroup>
 
+  <!--
+    AOT is off for Release: excluding OpenCvSharp.dll from AOT (below, to dodge the mono-aot-cross
+    crash from issue 8) leaves any AOT-compiled component with a field typed as an OpenCvSharp type
+    (e.g. Mat) unable to load at runtime - System.TypeLoadException: Attempting to load invalid
+    type. Confirmed against the deployed GitHub Pages build; every sample page except the one with
+    no OpenCvSharp-typed fields (BuildInfo) failed to render. Filed as issue 11; re-enable once the
+    underlying partial-AOT interaction (or issue 8 itself) is fixed upstream.
+  -->
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-    <RunAOTCompilation>True</RunAOTCompilation>
+    <RunAOTCompilation>False</RunAOTCompilation>
   </PropertyGroup>
 
   <ItemGroup>
