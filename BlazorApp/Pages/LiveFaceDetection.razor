@@ -44,6 +44,7 @@
     private CanvasClient? resultCanvasClient;
     private CascadeClassifier? cascade;
     private CancellationTokenSource? cts;
+    private Task? loopTask;
     private bool running;
     private string statusMessage = "";
 
@@ -74,6 +75,7 @@
         if (running || webcamClient is null)
             return;
 
+        running = true;
         statusMessage = "Requesting camera access...";
         try
         {
@@ -83,13 +85,13 @@
         catch (Exception ex)
         {
             statusMessage = $"Couldn't start the camera: {ex.Message}";
+            running = false;
             return;
         }
 
         statusMessage = "";
-        running = true;
         cts = new CancellationTokenSource();
-        _ = RunLoopAsync(cts.Token);
+        loopTask = RunLoopAsync(cts.Token);
     }
 
     private async Task StopAsync()
@@ -159,7 +161,11 @@
         if (running && webcamClient is not null)
         {
             await webcamClient.StopAsync();
+            running = false;
         }
+        if (loopTask is not null)
+            await loopTask;
         cascade?.Dispose();
+        cts?.Dispose();
     }
 }
