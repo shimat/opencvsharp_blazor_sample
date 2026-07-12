@@ -1,6 +1,6 @@
 # opencvsharp_blazor_sample
 
-### 🚀 [Live demo](https://shimat.github.io/opencvsharp_blazor_sample/opencvsharp_sample)
+## 🚀 [Live demo](https://shimat.github.io/opencvsharp_blazor_sample/opencvsharp_sample)
 
 Code samples showing [OpenCvSharp](https://github.com/shimat/opencvsharp) running entirely in the browser via Blazor WebAssembly. All image processing happens client-side, on-device, via WebAssembly — no server involved, no image ever leaves the browser.
 

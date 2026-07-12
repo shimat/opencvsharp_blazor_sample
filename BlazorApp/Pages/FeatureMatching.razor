@@ -106,7 +106,8 @@
         akaze.DetectAndCompute(grayMat, default, out var keypoints1, descriptors1);
         akaze.DetectAndCompute(rotatedMat, default, out var keypoints2, descriptors2);
 
-        using var matcher = new BFMatcher(NormTypes.L2, crossCheck: true);
+        // AKAZE.Create() defaults to the binary MLDB descriptor, so Hamming distance applies.
+        using var matcher = new BFMatcher(NormTypes.Hamming, crossCheck: true);
         var matches = matcher.Match(descriptors1, descriptors2);
 
         // Note: Cv2.DrawMatches' P/Invoke signature crashes the Mono interpreter on this wasm

@@ -108,6 +108,7 @@
 
         status = "Running GrabCut...";
         StateHasChanged();
+        await Task.Yield();
 
         using var mask = new Mat(srcMat.Size(), MatType.CV_8UC1, Scalar.All((double)GrabCutClasses.BGD));
         using var bgdModel = new Mat();
