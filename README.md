@@ -9,8 +9,11 @@ Code samples showing [OpenCvSharp](https://github.com/shimat/opencvsharp) runnin
 | Route | Description |
 |---|---|
 | `/` | Landing page |
-| `/opencvsharp_sample` | Loads a test image and runs a few `Cv2` operations on it (grayscale, pseudo-color, threshold, Canny edge detection, AKAZE keypoint detection), drawing the results to an HTML5 `<canvas>` |
 | `/build-info` | `Cv2.GetBuildInformation()` output for the OpenCV build compiled into this app |
+| `/opencvsharp_sample` | Loads a test image and runs a few basic `Cv2` operations on it (pseudo-color, threshold, Canny edge detection), drawing the results to an HTML5 `<canvas>` |
+| `/samples/features` | AKAZE keypoint detection, plus feature matching between an image and a rotated copy of itself |
+| `/samples/detection` | Real-time face detection against a live webcam feed using a Haar cascade classifier (see known issue below) |
+| `/samples/interactive` | Drag a rectangle over an image to run `Cv2.GrabCut` and extract the foreground |
 
 ## Stack
 
@@ -38,3 +41,4 @@ The current wasm-tools toolchain has a couple of rough edges around statically l
 
 - AOT-compiling `OpenCvSharp.dll` crashes the Mono AOT compiler ([#8](https://github.com/shimat/opencvsharp_blazor_sample/issues/8)) — worked around by excluding just that assembly from AOT compilation
 - The bundled `wasm-opt` predates some binaryen features Release publish needs ([dotnet/runtime#114723](https://github.com/dotnet/runtime/issues/114723)) — worked around by swapping in a newer build during CI publish
+- Any algorithm that internally allocates a `cv::UMat` (e.g. `ORB`, `CascadeClassifier.DetectMultiScale`) hangs or hard-aborts, because `cv::ocl::haveOpenCL()` throws instead of returning `false` on this wasm build ([opencvsharp#2037](https://github.com/shimat/opencvsharp/issues/2037)) — the root cause is a missing `-DWITH_OPENCL=OFF` in OpenCvSharp's wasm build CMake configuration, so it can't be worked around from this app. The `/samples/features` page avoids this by using AKAZE instead of ORB; the `/samples/detection` page (which needs `CascadeClassifier`) is kept as a preview with an on-page notice, pending an upstream fix

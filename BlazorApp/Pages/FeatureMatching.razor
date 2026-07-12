@@ -1,0 +1,143 @@
+@page "/samples/features"
+@using OpenCvSharp
+@using OpenCvSharp.XFeatures2D
+@inject IJSRuntime jsRuntime;
+@inject HttpClient httpClient;
+@implements IDisposable
+
+<PageTitle>Feature Matching</PageTitle>
+
+<h1>Feature Matching</h1>
+
+<p>
+    Two things a plain browser canvas can't do on its own: finding distinctive keypoints in an image,
+    and matching those keypoints between two images of the same scene.
+</p>
+
+<h2>AKAZE keypoints</h2>
+<div>
+    <canvas @ref="srcCanvas" width="256" height="256" style="border:1px solid gray;"></canvas>
+    <canvas @ref="akazeCanvas" width="256" height="256" style="border:1px solid gray;"></canvas>
+</div>
+<div>
+    <button @onclick="RunAkaze">Detect AKAZE keypoints</button>
+</div>
+
+<h2>Matching against a rotated copy</h2>
+<div>
+    <canvas @ref="matchCanvas" width="512" height="256" style="border:1px solid gray;"></canvas>
+</div>
+<div>
+    <button @onclick="RunMatching">Match features</button>
+</div>
+
+@code {
+    private Mat? srcMat;
+    private Mat? grayMat;
+    private ElementReference srcCanvas;
+    private ElementReference akazeCanvas;
+    private ElementReference matchCanvas;
+    private CanvasClient? srcCanvasClient;
+    private CanvasClient? akazeCanvasClient;
+    private CanvasClient? matchCanvasClient;
+
+    public void Dispose()
+    {
+        srcMat?.Dispose();
+        grayMat?.Dispose();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        var imageBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
+        srcMat ??= Mat.FromImageData(imageBytes);
+        if (grayMat is null)
+        {
+            grayMat = new Mat();
+            Cv2.CvtColor(srcMat, grayMat, ColorConversionCodes.BGR2GRAY);
+        }
+
+        srcCanvasClient ??= new CanvasClient(jsRuntime, srcCanvas);
+        akazeCanvasClient ??= new CanvasClient(jsRuntime, akazeCanvas);
+        matchCanvasClient ??= new CanvasClient(jsRuntime, matchCanvas);
+
+        await srcCanvasClient.DrawMatAsync(srcMat);
+    }
+
+    private async Task RunAkaze()
+    {
+        if (grayMat is null || akazeCanvasClient is null)
+            return;
+
+        using var akaze = AKAZE.Create();
+        using var descriptors = new Mat();
+        akaze.DetectAndCompute(grayMat, default, out var keypoints, descriptors);
+
+        using var dstMat = new Mat();
+        // A fixed, high-contrast color instead of the (default) randomized per-keypoint color,
+        // which otherwise blends into Mandrill's own multi-colored face.
+        Cv2.DrawKeypoints(grayMat, keypoints, dstMat, Scalar.Yellow, DrawMatchesFlags.DrawRichKeypoints);
+
+        await akazeCanvasClient.DrawMatAsync(dstMat);
+    }
+
+    private async Task RunMatching()
+    {
+        if (grayMat is null || matchCanvasClient is null)
+            return;
+
+        var center = new Point2f(grayMat.Width / 2f, grayMat.Height / 2f);
+        using var rotationMat = Cv2.GetRotationMatrix2D(center, 20, 1.0);
+        using var rotatedMat = new Mat();
+        Cv2.WarpAffine(grayMat, rotatedMat, rotationMat, grayMat.Size());
+
+        // Note: ORB's native implementation internally allocates a cv::UMat, which probes for
+        // OpenCL support - a probe that throws (rather than cleanly reporting "unavailable") on
+        // this wasm build and hangs the call. AKAZE doesn't hit that code path, so it's used here
+        // for both detection and matching.
+        using var akaze = AKAZE.Create();
+        using var descriptors1 = new Mat();
+        using var descriptors2 = new Mat();
+        akaze.DetectAndCompute(grayMat, default, out var keypoints1, descriptors1);
+        akaze.DetectAndCompute(rotatedMat, default, out var keypoints2, descriptors2);
+
+        using var matcher = new BFMatcher(NormTypes.L2, crossCheck: true);
+        var matches = matcher.Match(descriptors1, descriptors2);
+
+        // Note: Cv2.DrawMatches' P/Invoke signature crashes the Mono interpreter on this wasm
+        // build (OpenCvSharp.dll runs interpreted, not AOT-compiled - see BlazorApp.csproj's
+        // AOT-exclusion target). Draw the side-by-side comparison and correspondence lines
+        // manually instead, using only simple, already-proven-safe calls (CopyTo/Line/Circle).
+        var width = grayMat.Width + rotatedMat.Width;
+        var height = Math.Max(grayMat.Height, rotatedMat.Height);
+        using var combined = new Mat(new Size(width, height), MatType.CV_8UC3, Scalar.Black);
+
+        using (var leftRoi = combined[new Rect(0, 0, grayMat.Width, grayMat.Height)])
+        {
+            Cv2.CvtColor(grayMat, leftRoi, ColorConversionCodes.GRAY2BGR);
+        }
+        using (var rightRoi = combined[new Rect(grayMat.Width, 0, rotatedMat.Width, rotatedMat.Height)])
+        {
+            Cv2.CvtColor(rotatedMat, rightRoi, ColorConversionCodes.GRAY2BGR);
+        }
+
+        var xOffset = grayMat.Width;
+        foreach (var m in matches)
+        {
+            var p1 = (Point)keypoints1[m.QueryIdx].Pt;
+            var p2 = keypoints2[m.TrainIdx].Pt;
+            var p2Shifted = new Point((int)(p2.X + xOffset), (int)p2.Y);
+
+            Cv2.Line(combined, p1.X, p1.Y, p2Shifted.X, p2Shifted.Y, Scalar.LimeGreen, thickness: 1);
+            Cv2.Circle(combined, p1, 3, Scalar.Yellow, thickness: 1);
+            Cv2.Circle(combined, p2Shifted, 3, Scalar.Yellow, thickness: 1);
+        }
+
+        await matchCanvasClient.DrawMatAsync(combined);
+    }
+}

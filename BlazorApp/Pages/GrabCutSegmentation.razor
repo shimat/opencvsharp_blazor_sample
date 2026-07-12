@@ -1,0 +1,129 @@
+@page "/samples/interactive"
+@using OpenCvSharp
+@inject IJSRuntime jsRuntime
+@inject HttpClient httpClient
+@implements IDisposable
+
+<PageTitle>GrabCut Segmentation</PageTitle>
+
+<h1>Interactive GrabCut Segmentation</h1>
+
+<p>
+    Drag a rectangle around the subject, then release to run OpenCV's GrabCut algorithm and
+    extract just the foreground - not something a CSS filter or plain canvas trick can do.
+</p>
+
+<div style="display:flex; gap: 1rem; align-items:flex-start;">
+    <div style="position:relative; width:256px; height:256px;"
+         @onmousedown="OnMouseDown" @onmousemove="OnMouseMove" @onmouseup="OnMouseUp" @onmouseleave="OnMouseUp">
+        <canvas @ref="srcCanvas" width="256" height="256" style="position:absolute; left:0; top:0; border:1px solid gray;"></canvas>
+        @if (isDragging)
+        {
+            <div style="position:absolute; pointer-events:none; border:2px dashed yellow; left:@(RectLeft)px; top:@(RectTop)px; width:@(RectWidth)px; height:@(RectHeight)px;"></div>
+        }
+    </div>
+    <canvas @ref="resultCanvas" width="256" height="256" style="border:1px solid gray;"></canvas>
+</div>
+
+<p><em>@status</em></p>
+
+@code {
+    private Mat? srcMat;
+    private ElementReference srcCanvas;
+    private ElementReference resultCanvas;
+    private CanvasClient? srcCanvasClient;
+    private CanvasClient? resultCanvasClient;
+
+    private bool isDragging;
+    private double startX, startY, currentX, currentY;
+    private string status = "Drag a rectangle over the image to select the subject.";
+
+    private double RectLeft => Math.Min(startX, currentX);
+    private double RectTop => Math.Min(startY, currentY);
+    private double RectWidth => Math.Abs(currentX - startX);
+    private double RectHeight => Math.Abs(currentY - startY);
+
+    public void Dispose()
+    {
+        srcMat?.Dispose();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        var imageBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
+        srcMat ??= Mat.FromImageData(imageBytes);
+
+        srcCanvasClient ??= new CanvasClient(jsRuntime, srcCanvas);
+        resultCanvasClient ??= new CanvasClient(jsRuntime, resultCanvas);
+
+        await srcCanvasClient.DrawMatAsync(srcMat);
+    }
+
+    private void OnMouseDown(MouseEventArgs e)
+    {
+        isDragging = true;
+        startX = currentX = e.OffsetX;
+        startY = currentY = e.OffsetY;
+    }
+
+    private void OnMouseMove(MouseEventArgs e)
+    {
+        if (!isDragging)
+            return;
+
+        currentX = e.OffsetX;
+        currentY = e.OffsetY;
+    }
+
+    private async Task OnMouseUp(MouseEventArgs e)
+    {
+        if (!isDragging)
+            return;
+
+        isDragging = false;
+        currentX = e.OffsetX;
+        currentY = e.OffsetY;
+
+        var rect = new Rect((int)RectLeft, (int)RectTop, (int)RectWidth, (int)RectHeight);
+        await RunGrabCutAsync(rect);
+    }
+
+    private async Task RunGrabCutAsync(Rect rect)
+    {
+        if (srcMat is null || resultCanvasClient is null)
+            return;
+
+        var imageBounds = new Rect(0, 0, srcMat.Width, srcMat.Height);
+        rect = rect.Intersect(imageBounds);
+        if (rect.Width < 10 || rect.Height < 10)
+        {
+            status = "Selection too small - drag a bigger rectangle.";
+            return;
+        }
+
+        status = "Running GrabCut...";
+        StateHasChanged();
+
+        using var mask = new Mat(srcMat.Size(), MatType.CV_8UC1, Scalar.All((double)GrabCutClasses.BGD));
+        using var bgdModel = new Mat();
+        using var fgdModel = new Mat();
+        Cv2.GrabCut(srcMat, mask, rect, bgdModel, fgdModel, 5, GrabCutModes.InitWithRect);
+
+        // Mask values are 0=BGD, 1=FGD, 2=PR_BGD, 3=PR_FGD - the low bit distinguishes
+        // foreground (1, 3) from background (0, 2).
+        using var fgMask = new Mat();
+        Cv2.BitwiseAnd(mask, new Scalar(1), fgMask);
+        Cv2.Threshold(fgMask, fgMask, 0, 255, ThresholdTypes.Binary);
+
+        using var resultMat = new Mat(srcMat.Size(), srcMat.Type(), Scalar.White);
+        srcMat.CopyTo(resultMat, fgMask);
+
+        await resultCanvasClient.DrawMatAsync(resultMat);
+        status = "Done - drag again to try another selection.";
+    }
+}

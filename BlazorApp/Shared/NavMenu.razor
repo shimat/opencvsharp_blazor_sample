@@ -1,4 +1,4 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
+<div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
         <a class="navbar-brand" href="">BlazorApp</a>
         <button title="Navigation menu" class="navbar-toggler" @onclick="ToggleNavMenu">
@@ -11,17 +11,40 @@
     <nav class="flex-column">
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="oi oi-home" aria-hidden="true"></span> Home
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="opencvsharp_sample">
-                <span class="oi oi-map" aria-hidden="true"></span> OpenCvSharp Sample
+                <span class="nav-icon icon-home" aria-hidden="true"></span> Home
             </NavLink>
         </div>
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="build-info">
-                <span class="oi oi-info" aria-hidden="true"></span> Build Info
+                <span class="nav-icon icon-info" aria-hidden="true"></span> Build Info
+            </NavLink>
+        </div>
+
+        <div class="nav-category-header">Basic Processing</div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="opencvsharp_sample">
+                <span class="nav-icon icon-sliders" aria-hidden="true"></span> Filters
+            </NavLink>
+        </div>
+
+        <div class="nav-category-header">Feature Matching</div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="samples/features">
+                <span class="nav-icon icon-match" aria-hidden="true"></span> Keypoints &amp; Matching
+            </NavLink>
+        </div>
+
+        <div class="nav-category-header">Object Detection</div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="samples/detection">
+                <span class="nav-icon icon-viewfinder" aria-hidden="true"></span> Live Face Detection
+            </NavLink>
+        </div>
+
+        <div class="nav-category-header">Interactive</div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="samples/interactive">
+                <span class="nav-icon icon-cursor" aria-hidden="true"></span> GrabCut Segmentation
             </NavLink>
         </div>
     </nav>
