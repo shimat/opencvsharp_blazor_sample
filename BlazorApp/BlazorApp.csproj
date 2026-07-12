@@ -34,6 +34,7 @@
     P/Invoke module name from the native file's name verbatim (MSBuild %(Filename)), so this
     mismatch leaves the generated P/Invoke table empty and every native call throws
     DllNotFoundException at runtime. Re-reference a locally renamed copy so the names line up.
+    Filed upstream as shimat/opencvsharp#2039.
   -->
   <Target Name="FixOpenCvSharpWasmNativeLibName" BeforeTargets="_PrepareForBrowserWasmBuildNative">
     <ItemGroup>
