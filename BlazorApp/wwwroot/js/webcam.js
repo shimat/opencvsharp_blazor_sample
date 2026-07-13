@@ -23,8 +23,18 @@ var stopWebcam = function (videoElement) {
 // value directly to/from a JS Uint8Array without a JSON/base64 round trip, which matters a lot
 // for a payload this size called every frame.
 var captureFrame = function (videoElement, canvasElement, targetWidth, targetHeight) {
-    const width = targetWidth || videoElement.videoWidth;
-    const height = targetHeight || videoElement.videoHeight;
+    // If only one dimension is given, derive the other from the video's native aspect ratio
+    // instead of leaving it at native resolution, which would stretch the drawn frame.
+    let width = targetWidth;
+    let height = targetHeight;
+    if (width && !height) {
+        height = Math.round(width * videoElement.videoHeight / videoElement.videoWidth);
+    } else if (height && !width) {
+        width = Math.round(height * videoElement.videoWidth / videoElement.videoHeight);
+    } else if (!width && !height) {
+        width = videoElement.videoWidth;
+        height = videoElement.videoHeight;
+    }
     canvasElement.width = width;
     canvasElement.height = height;
 

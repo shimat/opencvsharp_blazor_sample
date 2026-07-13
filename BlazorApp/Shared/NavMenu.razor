@@ -41,6 +41,7 @@
     </nav>
 </div>
 
+@implements IDisposable
 @code {
     [Inject] private NavigationManager NavigationManager { get; set; } = default!;
 
@@ -51,10 +52,27 @@
 
     protected override void OnInitialized()
     {
-        var currentRoute = NavigationManager.ToBaseRelativePath(NavigationManager.Uri).TrimEnd('/');
-        var currentCategory = SampleCatalog.Samples.FirstOrDefault(s => s.Route == currentRoute)?.Category;
-        expandedCategories.Add(currentCategory ?? SampleCatalog.Samples[0].Category);
+        NavigationManager.LocationChanged += OnLocationChanged;
+        expandedCategories.Add(GetCurrentCategory() ?? SampleCatalog.Samples[0].Category);
     }
+
+    // Keeps the current page's category expanded after client-side navigation - OnInitialized only
+    // runs once for this component's lifetime, so without this a category other than the one
+    // active on first load never auto-expands.
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        var category = GetCurrentCategory();
+        if (category is not null && expandedCategories.Add(category))
+            InvokeAsync(StateHasChanged);
+    }
+
+    private string? GetCurrentCategory()
+    {
+        var currentRoute = NavigationManager.ToBaseRelativePath(NavigationManager.Uri).TrimEnd('/');
+        return SampleCatalog.Samples.FirstOrDefault(s => s.Route == currentRoute)?.Category;
+    }
+
+    public void Dispose() => NavigationManager.LocationChanged -= OnLocationChanged;
 
     private bool IsExpanded(string category) => expandedCategories.Contains(category);
 

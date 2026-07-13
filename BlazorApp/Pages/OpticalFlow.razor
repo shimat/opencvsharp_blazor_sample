@@ -90,6 +90,12 @@
 
         if (webcamClient is not null)
             await webcamClient.StopAsync();
+
+        if (loopTask is not null)
+            await loopTask;
+        cts?.Dispose();
+        cts = null;
+        loopTask = null;
     }
 
     private async Task RunLoopAsync(CancellationToken token)
@@ -131,40 +137,51 @@
         using var colorMat = Mat.FromImageData(frameBytes);
 
         var gray = new Mat();
-        Cv2.CvtColor(colorMat, gray, ColorConversionCodes.BGR2GRAY);
-
-        if (prevGray is null || prevPoints.Length < MinTrackedPoints)
+        var grayOwned = false;
+        try
         {
-            prevGray?.Dispose();
+            Cv2.CvtColor(colorMat, gray, ColorConversionCodes.BGR2GRAY);
+
+            if (prevGray is null || prevPoints.Length < MinTrackedPoints)
+            {
+                prevGray?.Dispose();
+                prevGray = gray;
+                grayOwned = true;
+                prevPoints = DetectFeatures(gray);
+                await resultCanvasClient.DrawMatAsync(colorMat);
+                return;
+            }
+
+            var nextPoints = Array.Empty<Point2f>();
+            byte[] status;
+            float[] err;
+            Cv2.CalcOpticalFlowPyrLK(prevGray, gray, prevPoints, ref nextPoints, out status, out err);
+
+            var survivingPoints = new List<Point2f>();
+            for (var i = 0; i < status.Length; i++)
+            {
+                if (status[i] == 0)
+                    continue;
+
+                Cv2.Line(colorMat, (Point)prevPoints[i], (Point)nextPoints[i], Scalar.LimeGreen, thickness: 2);
+                Cv2.Circle(colorMat, (Point)nextPoints[i], 3, Scalar.Red, thickness: -1);
+                survivingPoints.Add(nextPoints[i]);
+            }
+
+            prevGray.Dispose();
             prevGray = gray;
-            prevPoints = DetectFeatures(gray);
+            grayOwned = true;
+            prevPoints = survivingPoints.Count >= MinTrackedPoints
+                ? survivingPoints.ToArray()
+                : DetectFeatures(gray);
+
             await resultCanvasClient.DrawMatAsync(colorMat);
-            return;
         }
-
-        var nextPoints = Array.Empty<Point2f>();
-        byte[] status;
-        float[] err;
-        Cv2.CalcOpticalFlowPyrLK(prevGray, gray, prevPoints, ref nextPoints, out status, out err);
-
-        var survivingPoints = new List<Point2f>();
-        for (var i = 0; i < status.Length; i++)
+        finally
         {
-            if (status[i] == 0)
-                continue;
-
-            Cv2.Line(colorMat, (Point)prevPoints[i], (Point)nextPoints[i], Scalar.LimeGreen, thickness: 2);
-            Cv2.Circle(colorMat, (Point)nextPoints[i], 3, Scalar.Red, thickness: -1);
-            survivingPoints.Add(nextPoints[i]);
+            if (!grayOwned)
+                gray.Dispose();
         }
-
-        prevGray.Dispose();
-        prevGray = gray;
-        prevPoints = survivingPoints.Count >= MinTrackedPoints
-            ? survivingPoints.ToArray()
-            : DetectFeatures(gray);
-
-        await resultCanvasClient.DrawMatAsync(colorMat);
     }
 
     private static Point2f[] DetectFeatures(Mat gray)

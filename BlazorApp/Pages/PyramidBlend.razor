@@ -51,6 +51,7 @@
     private Mat? leftMat;
     private Mat? rightMat;
     private byte[]? defaultLeftBytes;
+    private Mat? defaultRightMat;
     private ElementReference naiveCanvas;
     private ElementReference blendedCanvas;
     private CanvasClient? naiveCanvasClient;
@@ -62,6 +63,7 @@
     {
         leftMat?.Dispose();
         rightMat?.Dispose();
+        defaultRightMat?.Dispose();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -76,7 +78,8 @@
 
         defaultLeftBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
         leftMat = Mat.FromImageData(defaultLeftBytes);
-        rightMat = GenerateInvertedDefault(leftMat);
+        defaultRightMat = GenerateInvertedDefault(leftMat);
+        rightMat = defaultRightMat.Clone();
 
         await RunBlendAsync();
     }
@@ -134,11 +137,11 @@
 
     private async Task ResetRightAsync()
     {
-        if (leftMat is null)
+        if (defaultRightMat is null)
             return;
 
         rightMat?.Dispose();
-        rightMat = GenerateInvertedDefault(leftMat);
+        rightMat = defaultRightMat.Clone();
         await RunBlendAsync();
     }
 

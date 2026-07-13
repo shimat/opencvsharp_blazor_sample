@@ -117,6 +117,12 @@
 
         if (webcamClient is not null)
             await webcamClient.StopAsync();
+
+        if (loopTask is not null)
+            await loopTask;
+        cts?.Dispose();
+        cts = null;
+        loopTask = null;
     }
 
     private async Task RunLoopAsync(CancellationToken token)
