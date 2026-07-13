@@ -7,7 +7,8 @@
 // byte[] directly to/from a JS Uint8Array without a JSON/string round trip, which is both
 // simpler and considerably faster than encoding through base64.
 //
-// Re-encodes as BMP via encodeBmp() (bmpencoder.js) rather than JPEG/PNG - see that file for why.
+// Re-encodes as PNG (lossless) rather than re-using the original bytes, since the image was
+// just downscaled on the canvas above.
 var loadAndResizeImageBytes = async function (bytes, maxDimension) {
     const blob = new Blob([bytes]);
     const bitmap = await createImageBitmap(blob);
@@ -22,8 +23,8 @@ var loadAndResizeImageBytes = async function (bytes, maxDimension) {
         const context = canvas.getContext("2d");
         context.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
 
-        const imageData = context.getImageData(0, 0, targetWidth, targetHeight);
-        return encodeBmp(imageData);
+        const outBlob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+        return new Uint8Array(await outBlob.arrayBuffer());
     } finally {
         bitmap.close();
     }

@@ -23,9 +23,7 @@ namespace BlazorApp
             // Let the browser's own (fast, native) image pipeline decode and downscale the photo
             // first - handing OpenCV a full-resolution phone photo directly would decode it on
             // this interpreted wasm build's single UI thread, which can look like the whole app
-            // has frozen for a large image. It's encoded as BMP, not JPEG/PNG: this wasm build's
-            // OpenCV can't decode either compressed format via Mat.FromImageData (confirmed with
-            // byte-for-byte correct, well-formed input) - only BMP is proven to work.
+            // has frozen for a large image.
             var resizedBytes = await jsRuntime.InvokeAsync<byte[]>("loadAndResizeImageBytes", memoryStream.ToArray(), targetSize);
 
             using var decoded = Mat.FromImageData(resizedBytes);
