@@ -36,17 +36,16 @@ function encodeBmp(imageData) {
     view.setUint32(50, 0, true);
 
     const src = imageData.data;
-    let offset = 54;
+    const pixels = new Uint8Array(buffer, 54);
+    let offset = 0;
     for (let y = height - 1; y >= 0; y--) {
         for (let x = 0; x < width; x++) {
             const srcIndex = (y * width + x) * 4;
-            view.setUint8(offset++, src[srcIndex + 2]); // B
-            view.setUint8(offset++, src[srcIndex + 1]); // G
-            view.setUint8(offset++, src[srcIndex]);     // R
+            pixels[offset++] = src[srcIndex + 2]; // B
+            pixels[offset++] = src[srcIndex + 1]; // G
+            pixels[offset++] = src[srcIndex];     // R
         }
-        for (let p = 0; p < rowSize - width * 3; p++) {
-            view.setUint8(offset++, 0);
-        }
+        offset += rowSize - width * 3;
     }
 
     return new Uint8Array(buffer);
