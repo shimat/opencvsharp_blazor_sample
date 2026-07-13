@@ -13,16 +13,6 @@
     entirely in the browser - nothing is uploaded anywhere.
 </p>
 
-<div style="border:1px solid #e0a800; background:#fff3cd; color:#664d03; padding:0.75rem 1rem; border-radius:4px; margin-bottom:1rem;">
-    <strong>Known issue:</strong> face detection currently crashes on this WebAssembly build.
-    <code>CascadeClassifier.DetectMultiScale</code> internally probes for OpenCL support via
-    <code>cv::UMat</code>, and that probe throws instead of cleanly reporting "unavailable" on
-    this build, aborting the WASM runtime. This is an upstream OpenCV WASM build issue (missing
-    <code>-DWITH_OPENCL=OFF</code> at build time), not something fixable from this sample - see
-    <a href="https://github.com/shimat/opencvsharp/issues/2037" target="_blank">shimat/opencvsharp#2037</a>
-    for details. The page is kept here as a preview of the intended feature, pending an upstream fix.
-</div>
-
 <video @ref="videoElement" autoplay muted playsinline style="display:none"></video>
 <canvas @ref="captureCanvas" style="display:none"></canvas>
 <canvas @ref="resultCanvas" width="480" height="360" style="border:1px solid gray;"></canvas>
@@ -121,7 +111,7 @@
 
             try
             {
-                await Task.Delay(250, token);
+                await Task.Delay(30, token);
             }
             catch (TaskCanceledException)
             {
@@ -135,13 +125,11 @@
         if (webcamClient is null || resultCanvasClient is null || cascade is null)
             return;
 
-        var jpegBytes = await webcamClient.CaptureFrameAsync();
-        if (jpegBytes.Length == 0)
+        var frameBytes = await webcamClient.CaptureFrameAsync(FrameWidth, FrameHeight);
+        if (frameBytes.Length == 0)
             return;
 
-        using var rawMat = Mat.FromImageData(jpegBytes);
-        using var colorMat = new Mat();
-        Cv2.Resize(rawMat, colorMat, new Size(FrameWidth, FrameHeight));
+        using var colorMat = Mat.FromImageData(frameBytes);
 
         using var grayMat = new Mat();
         Cv2.CvtColor(colorMat, grayMat, ColorConversionCodes.BGR2GRAY);

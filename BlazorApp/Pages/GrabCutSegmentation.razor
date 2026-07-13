@@ -25,10 +25,16 @@
     <canvas @ref="resultCanvas" width="256" height="256" style="border:1px solid gray;"></canvas>
 </div>
 
+<div style="margin-top:0.5rem;">
+    <PhotoPicker OnFileSelected="OnPhotoSelectedAsync" OnReset="ResetToDefaultAsync" />
+</div>
 <p><em>@status</em></p>
 
 @code {
+    private const int CanvasSize = 256;
+
     private Mat? srcMat;
+    private byte[]? defaultBytes;
     private ElementReference srcCanvas;
     private ElementReference resultCanvas;
     private CanvasClient? srcCanvasClient;
@@ -55,13 +61,54 @@
         if (!firstRender)
             return;
 
-        var imageBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
-        srcMat ??= Mat.FromImageData(imageBytes);
+        defaultBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
+        srcMat ??= Mat.FromImageData(defaultBytes);
 
         srcCanvasClient ??= new CanvasClient(jsRuntime, srcCanvas);
         resultCanvasClient ??= new CanvasClient(jsRuntime, resultCanvas);
 
         await srcCanvasClient.DrawMatAsync(srcMat);
+        await ClearResultAsync();
+    }
+
+    private async Task OnPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            var newMat = await ImageLoader.LoadFromFileAsync(jsRuntime, file, CanvasSize);
+            srcMat?.Dispose();
+            srcMat = newMat;
+            status = "Drag a rectangle over the image to select the subject.";
+        }
+        catch (Exception ex)
+        {
+            status = $"Couldn't load that image: {ex.Message}";
+            return;
+        }
+
+        isDragging = false;
+        await srcCanvasClient!.DrawMatAsync(srcMat);
+        await ClearResultAsync();
+    }
+
+    private async Task ResetToDefaultAsync()
+    {
+        if (defaultBytes is null)
+            return;
+
+        srcMat?.Dispose();
+        srcMat = Mat.FromImageData(defaultBytes);
+        isDragging = false;
+        status = "Drag a rectangle over the image to select the subject.";
+
+        await srcCanvasClient!.DrawMatAsync(srcMat);
+        await ClearResultAsync();
+    }
+
+    private async Task ClearResultAsync()
+    {
+        using var blank = new Mat(new Size(CanvasSize, CanvasSize), MatType.CV_8UC3, Scalar.All(220));
+        await resultCanvasClient!.DrawMatAsync(blank);
     }
 
     private void OnMouseDown(MouseEventArgs e)

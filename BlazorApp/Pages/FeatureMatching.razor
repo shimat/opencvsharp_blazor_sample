@@ -14,6 +14,11 @@
     and matching those keypoints between two images of the same scene.
 </p>
 
+<div>
+    <PhotoPicker OnFileSelected="OnPhotoSelectedAsync" OnReset="ResetToDefaultAsync" />
+</div>
+<p><em>@photoStatus</em></p>
+
 <h2>AKAZE keypoints</h2>
 <div>
     <canvas @ref="srcCanvas" width="256" height="256" style="border:1px solid gray;"></canvas>
@@ -32,14 +37,18 @@
 </div>
 
 @code {
+    private const int CanvasSize = 256;
+
     private Mat? srcMat;
     private Mat? grayMat;
+    private byte[]? defaultBytes;
     private ElementReference srcCanvas;
     private ElementReference akazeCanvas;
     private ElementReference matchCanvas;
     private CanvasClient? srcCanvasClient;
     private CanvasClient? akazeCanvasClient;
     private CanvasClient? matchCanvasClient;
+    private string photoStatus = "";
 
     public void Dispose()
     {
@@ -54,19 +63,59 @@
         if (!firstRender)
             return;
 
-        var imageBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
-        srcMat ??= Mat.FromImageData(imageBytes);
-        if (grayMat is null)
-        {
-            grayMat = new Mat();
-            Cv2.CvtColor(srcMat, grayMat, ColorConversionCodes.BGR2GRAY);
-        }
+        defaultBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
+        srcMat ??= Mat.FromImageData(defaultBytes);
+        grayMat ??= new Mat();
+        Cv2.CvtColor(srcMat, grayMat, ColorConversionCodes.BGR2GRAY);
 
         srcCanvasClient ??= new CanvasClient(jsRuntime, srcCanvas);
         akazeCanvasClient ??= new CanvasClient(jsRuntime, akazeCanvas);
         matchCanvasClient ??= new CanvasClient(jsRuntime, matchCanvas);
 
         await srcCanvasClient.DrawMatAsync(srcMat);
+        await ClearResultCanvasesAsync();
+    }
+
+    private async Task OnPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            var newMat = await ImageLoader.LoadFromFileAsync(jsRuntime, file, CanvasSize);
+            srcMat?.Dispose();
+            srcMat = newMat;
+            Cv2.CvtColor(srcMat, grayMat!, ColorConversionCodes.BGR2GRAY);
+            photoStatus = "";
+        }
+        catch (Exception ex)
+        {
+            photoStatus = $"Couldn't load that image: {ex.Message}";
+            return;
+        }
+
+        await srcCanvasClient!.DrawMatAsync(srcMat);
+        await ClearResultCanvasesAsync();
+    }
+
+    private async Task ResetToDefaultAsync()
+    {
+        if (defaultBytes is null)
+            return;
+
+        srcMat?.Dispose();
+        srcMat = Mat.FromImageData(defaultBytes);
+        Cv2.CvtColor(srcMat, grayMat!, ColorConversionCodes.BGR2GRAY);
+        photoStatus = "";
+
+        await srcCanvasClient!.DrawMatAsync(srcMat);
+        await ClearResultCanvasesAsync();
+    }
+
+    private async Task ClearResultCanvasesAsync()
+    {
+        using var blank = new Mat(new Size(CanvasSize, CanvasSize), MatType.CV_8UC3, Scalar.All(220));
+        using var blankWide = new Mat(new Size(CanvasSize * 2, CanvasSize), MatType.CV_8UC3, Scalar.All(220));
+        await akazeCanvasClient!.DrawMatAsync(blank);
+        await matchCanvasClient!.DrawMatAsync(blankWide);
     }
 
     private async Task RunAkaze()
