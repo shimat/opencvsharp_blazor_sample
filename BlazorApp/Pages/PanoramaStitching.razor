@@ -17,16 +17,12 @@
 </p>
 
 <div style="border:1px solid #e0a800; background:#fff3cd; color:#664d03; padding:0.75rem 1rem; border-radius:4px; margin-bottom:1rem;">
-    <strong>Known issue:</strong> running the stitcher currently aborts this WebAssembly build.
-    <code>Cv2.Stitcher.Stitch</code> hits the same underlying problem as
-    <a href="samples/aruco">ArUco detection</a> - it internally probes for OpenCL support via
-    <code>cv::UMat</code>, and that probe aborts the WASM runtime instead of cleanly reporting
-    "unavailable" (see
-    <a href="https://github.com/shimat/opencvsharp/issues/2037" target="_blank">shimat/opencvsharp#2037</a>,
-    fix in progress in
-    <a href="https://github.com/shimat/opencvsharp/pull/2041" target="_blank">shimat/opencvsharp#2041</a>).
-    Loading the source photos works fine - only the "Stitch" button below is affected, kept here
-    as a preview pending the upstream fix landing in a released package.
+    <strong>Known issue:</strong> <code>Cv2.Stitcher.Stitch</code> currently aborts this
+    WebAssembly build with a <code>cv::gemm</code> assertion failure deep in the bundle adjustment
+    step, immediately followed by an unrecoverable WASM trap (see
+    <a href="https://github.com/shimat/opencvsharp_blazor_sample/issues/12" target="_blank">opencvsharp_blazor_sample#12</a>).
+    Loading and previewing the source photos works fine - only the "Stitch" button is affected, so
+    it's disabled below pending that issue being resolved.
 </div>
 
 <div style="display:flex; gap:1.5rem; flex-wrap:wrap;">
@@ -43,7 +39,7 @@
 </div>
 
 <div>
-    <button @onclick="StitchAsync">Stitch</button>
+    <button @onclick="StitchAsync" disabled title="Disabled - see the known issue above">Stitch</button>
 </div>
 <p><em>@status</em></p>
 
