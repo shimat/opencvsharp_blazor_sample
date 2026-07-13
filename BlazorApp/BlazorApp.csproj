@@ -32,8 +32,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.9" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.9" PrivateAssets="all" />
-    <PackageReference Include="OpenCvSharp5" Version="5.0.0.20260712" />
-    <PackageReference Include="OpenCvSharp5.runtime.wasm" Version="5.0.0.20260712" />
+    <PackageReference Include="OpenCvSharp5" Version="5.0.0.20260713" />
+    <PackageReference Include="OpenCvSharp5.runtime.wasm" Version="5.0.0.20260713" />
   </ItemGroup>
 
   <!--

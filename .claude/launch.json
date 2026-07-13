@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "blazor-dev",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "BlazorApp"],
+      "port": 5089
+    }
+  ]
+}

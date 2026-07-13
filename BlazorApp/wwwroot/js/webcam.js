@@ -14,15 +14,16 @@ var stopWebcam = function (videoElement) {
     videoElement.srcObject = null;
 }
 
-// Returns a BMP byte array, not a JPEG dataURL: this wasm build's OpenCV has no JPEG codec, so
-// Mat.FromImageData would silently decode a JPEG frame to an empty Mat (see bmpencoder.js).
+// Returns a JPEG byte array, not raw pixel data: encoding via the canvas's native (often
+// hardware-accelerated) JPEG encoder is both faster and produces a much smaller payload than an
+// uncompressed bitmap, which matters a lot for a capture called every frame.
 // Draws directly at (targetWidth, targetHeight) when given, rather than the camera's native
 // resolution (often 720p+) - callers resize down anyway, and capturing straight at the size they
-// need cuts both the BMP-encode cost and the payload size dramatically, which otherwise dominated
+// need cuts both the encode cost and the payload size dramatically, which otherwise dominated
 // per-frame latency. Returned as a raw Uint8Array (not base64): Blazor marshals a byte[] return
 // value directly to/from a JS Uint8Array without a JSON/base64 round trip, which matters a lot
 // for a payload this size called every frame.
-var captureFrame = function (videoElement, canvasElement, targetWidth, targetHeight) {
+var captureFrame = async function (videoElement, canvasElement, targetWidth, targetHeight) {
     // If only one dimension is given, derive the other from the video's native aspect ratio
     // instead of leaving it at native resolution, which would stretch the drawn frame.
     let width = targetWidth;
@@ -38,9 +39,9 @@ var captureFrame = function (videoElement, canvasElement, targetWidth, targetHei
     canvasElement.width = width;
     canvasElement.height = height;
 
-    const context = canvasElement.getContext("2d", { willReadFrequently: true });
+    const context = canvasElement.getContext("2d");
     context.drawImage(videoElement, 0, 0, width, height);
 
-    const imageData = context.getImageData(0, 0, width, height);
-    return encodeBmp(imageData);
+    const blob = await new Promise((resolve) => canvasElement.toBlob(resolve, "image/jpeg", 0.85));
+    return new Uint8Array(await blob.arrayBuffer());
 }
