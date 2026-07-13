@@ -1,0 +1,292 @@
+@page "/samples/photo-editing"
+@using OpenCvSharp
+@inject IJSRuntime jsRuntime
+@inject HttpClient httpClient
+@implements IDisposable
+
+<PageTitle>Seamless Clone &amp; Inpainting</PageTitle>
+
+<h1>Seamless Clone &amp; Inpainting</h1>
+
+<div>
+    <PhotoPicker OnFileSelected="OnPhotoSelectedAsync" OnReset="ResetToDefaultAsync" />
+</div>
+<p><em>@photoStatus</em></p>
+
+<h2>Poisson seamless cloning</h2>
+<p>
+    Drag the orange blob anywhere on the photo. The left result is a naive copy-paste - a plain
+    canvas can do that much. The right result runs <code>Cv2.SeamlessClone</code>, which solves a
+    Poisson equation over the patch so its edges blend into the surrounding colors and lighting
+    instead of leaving a hard seam.
+</p>
+
+<div style="display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap;">
+    <div>
+        <div style="position:relative; width:256px; height:256px;"
+             @onmousedown="OnCloneMouseDown" @onmousemove="OnCloneMouseMove" @onmouseup="OnCloneMouseUp" @onmouseleave="OnCloneMouseUp">
+            <canvas @ref="naiveCanvas" width="256" height="256" style="position:absolute; left:0; top:0; border:1px solid gray; cursor:grab;"></canvas>
+        </div>
+        <p><small>Naive copy-paste (drag me)</small></p>
+    </div>
+    <div>
+        <canvas @ref="seamlessCanvas" width="256" height="256" style="border:1px solid gray;"></canvas>
+        <p><small>Cv2.SeamlessClone(NormalClone)</small></p>
+    </div>
+</div>
+
+<hr />
+
+<h2>Inpainting</h2>
+<p>
+    Paint over part of the photo, then remove it - <code>Cv2.Inpaint</code> fills the painted
+    region by propagating nearby texture inward, rather than just covering it up.
+</p>
+
+<div style="display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap;">
+    <div style="position:relative; width:256px; height:256px;"
+         @onmousedown="OnInpaintMouseDown" @onmousemove="OnInpaintMouseMove" @onmouseup="OnInpaintMouseUp" @onmouseleave="OnInpaintMouseUp">
+        <canvas @ref="inpaintSrcCanvas" width="256" height="256" style="position:absolute; left:0; top:0; border:1px solid gray;"></canvas>
+        <svg style="position:absolute; left:0; top:0; pointer-events:none;" width="256" height="256">
+            @foreach (var p in inpaintMaskPoints)
+            {
+                <circle cx="@p.X" cy="@p.Y" r="8" fill="rgba(255,0,0,0.5)" />
+            }
+        </svg>
+    </div>
+    <canvas @ref="inpaintResultCanvas" width="256" height="256" style="border:1px solid gray;"></canvas>
+</div>
+
+<div>
+    <button @onclick="ClearInpaintMask">Clear</button>
+    <button @onclick="RunInpaintAsync">Remove painted area</button>
+</div>
+<p><em>@inpaintStatus</em></p>
+
+@code {
+    private const int CanvasSize = 256;
+    private const int PatchSize = 90;
+
+    // --- Seamless clone section ---
+    private Mat? mandrillMat;
+    private Mat? patchMat;
+    private Mat? patchMaskMat;
+    private ElementReference naiveCanvas;
+    private ElementReference seamlessCanvas;
+    private CanvasClient? naiveCanvasClient;
+    private CanvasClient? seamlessCanvasClient;
+    private Point patchCenter = new(128, 90);
+    private bool isDraggingPatch;
+
+    // --- Inpainting section ---
+    private Mat? inpaintSrcMat;
+    private ElementReference inpaintSrcCanvas;
+    private ElementReference inpaintResultCanvas;
+    private CanvasClient? inpaintSrcCanvasClient;
+    private CanvasClient? inpaintResultCanvasClient;
+    private readonly List<Point> inpaintMaskPoints = new();
+    private bool isPaintingMask;
+    private string inpaintStatus = "Paint over an area, then remove it.";
+
+    // --- Shared photo source (both sections work off the same photo) ---
+    private byte[]? defaultBytes;
+    private string photoStatus = "";
+
+    public void Dispose()
+    {
+        mandrillMat?.Dispose();
+        patchMat?.Dispose();
+        patchMaskMat?.Dispose();
+        inpaintSrcMat?.Dispose();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        (patchMat, patchMaskMat) = GeneratePatch();
+        naiveCanvasClient ??= new CanvasClient(jsRuntime, naiveCanvas);
+        seamlessCanvasClient ??= new CanvasClient(jsRuntime, seamlessCanvas);
+        inpaintSrcCanvasClient ??= new CanvasClient(jsRuntime, inpaintSrcCanvas);
+        inpaintResultCanvasClient ??= new CanvasClient(jsRuntime, inpaintResultCanvas);
+
+        defaultBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
+        await LoadPhotoAsync(Mat.FromImageData(defaultBytes));
+    }
+
+    private async Task OnPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            var newMat = await ImageLoader.LoadFromFileAsync(jsRuntime, file, CanvasSize);
+            photoStatus = "";
+            await LoadPhotoAsync(newMat);
+        }
+        catch (Exception ex)
+        {
+            photoStatus = $"Couldn't load that image: {ex.Message}";
+        }
+    }
+
+    private async Task ResetToDefaultAsync()
+    {
+        if (defaultBytes is null)
+            return;
+
+        photoStatus = "";
+        await LoadPhotoAsync(Mat.FromImageData(defaultBytes));
+    }
+
+    // Both sections work from independent clones of the same source photo, so processing in one
+    // section never mutates the other's copy.
+    private async Task LoadPhotoAsync(Mat normalized)
+    {
+        mandrillMat?.Dispose();
+        inpaintSrcMat?.Dispose();
+        mandrillMat = normalized;
+        inpaintSrcMat = normalized.Clone();
+
+        patchCenter = new Point(mandrillMat.Width / 2, mandrillMat.Height / 3);
+        inpaintMaskPoints.Clear();
+        inpaintStatus = "Paint over an area, then remove it.";
+
+        await DrawNaivePreviewAsync();
+        await RunSeamlessCloneAsync();
+        await inpaintSrcCanvasClient!.DrawMatAsync(inpaintSrcMat);
+
+        using var blank = new Mat(inpaintSrcMat.Size(), MatType.CV_8UC3, Scalar.All(220));
+        await inpaintResultCanvasClient!.DrawMatAsync(blank);
+    }
+
+    // --- Seamless clone handlers ---
+
+    private async Task OnCloneMouseDown(MouseEventArgs e)
+    {
+        isDraggingPatch = true;
+        await MovePatchAsync(e);
+    }
+
+    private async Task OnCloneMouseMove(MouseEventArgs e)
+    {
+        if (isDraggingPatch)
+            await MovePatchAsync(e);
+    }
+
+    private async Task OnCloneMouseUp(MouseEventArgs e)
+    {
+        if (!isDraggingPatch)
+            return;
+
+        isDraggingPatch = false;
+        await RunSeamlessCloneAsync();
+    }
+
+    private async Task MovePatchAsync(MouseEventArgs e)
+    {
+        var half = PatchSize / 2;
+        var x = Math.Clamp((int)e.OffsetX, half, CanvasSize - half);
+        var y = Math.Clamp((int)e.OffsetY, half, CanvasSize - half);
+        patchCenter = new Point(x, y);
+        await DrawNaivePreviewAsync();
+    }
+
+    private async Task DrawNaivePreviewAsync()
+    {
+        if (mandrillMat is null || patchMat is null || patchMaskMat is null || naiveCanvasClient is null)
+            return;
+
+        using var preview = new Mat();
+        mandrillMat.CopyTo(preview);
+
+        var roi = new Rect(patchCenter.X - PatchSize / 2, patchCenter.Y - PatchSize / 2, PatchSize, PatchSize);
+        using var previewRoi = new Mat(preview, roi);
+        patchMat.CopyTo(previewRoi, patchMaskMat);
+
+        await naiveCanvasClient.DrawMatAsync(preview);
+    }
+
+    private async Task RunSeamlessCloneAsync()
+    {
+        if (mandrillMat is null || patchMat is null || patchMaskMat is null || seamlessCanvasClient is null)
+            return;
+
+        // Cv2.SeamlessClone mutates its src/dst/mask arguments in place on this wasm build, despite
+        // all three being documented as read-only inputs - passing the shared patchMat/mandrillMat/
+        // patchMaskMat fields directly leaves them corrupted for every subsequent redraw (the
+        // naive preview would alternate between a solid and a hollow ellipse depending on whether
+        // a seamless clone had just run). Passing throwaway clones of all three keeps the
+        // corruption from leaking into shared state.
+        using var srcClone = patchMat.Clone();
+        using var dstClone = mandrillMat.Clone();
+        using var maskClone = patchMaskMat.Clone();
+        using var result = new Mat();
+        Cv2.SeamlessClone(srcClone, dstClone, maskClone, patchCenter, result, SeamlessCloneFlags.NormalClone);
+        await seamlessCanvasClient.DrawMatAsync(result);
+    }
+
+    // A small orange blob on an irrelevant background - only the blob (via the mask) gets pasted.
+    private static (Mat patch, Mat mask) GeneratePatch()
+    {
+        var center = new Point(PatchSize / 2, PatchSize / 2);
+        var axes = new Size(PatchSize / 2 - 8, PatchSize / 3);
+
+        var patch = new Mat(new Size(PatchSize, PatchSize), MatType.CV_8UC3, Scalar.All(128));
+        Cv2.Ellipse(patch, center, axes, angle: 20, startAngle: 0, endAngle: 360, new Scalar(20, 140, 250), thickness: -1);
+
+        var mask = new Mat(new Size(PatchSize, PatchSize), MatType.CV_8UC1, Scalar.Black);
+        Cv2.Ellipse(mask, center, axes, angle: 20, startAngle: 0, endAngle: 360, new Scalar(255), thickness: -1);
+
+        return (patch, mask);
+    }
+
+    // --- Inpainting handlers ---
+
+    private void OnInpaintMouseDown(MouseEventArgs e)
+    {
+        isPaintingMask = true;
+        inpaintMaskPoints.Add(new Point((int)e.OffsetX, (int)e.OffsetY));
+    }
+
+    private void OnInpaintMouseMove(MouseEventArgs e)
+    {
+        if (isPaintingMask)
+            inpaintMaskPoints.Add(new Point((int)e.OffsetX, (int)e.OffsetY));
+    }
+
+    private void OnInpaintMouseUp(MouseEventArgs e) => isPaintingMask = false;
+
+    private void ClearInpaintMask()
+    {
+        inpaintMaskPoints.Clear();
+        inpaintStatus = "Mask cleared - paint again.";
+    }
+
+    private async Task RunInpaintAsync()
+    {
+        if (inpaintSrcMat is null || inpaintResultCanvasClient is null)
+            return;
+
+        if (inpaintMaskPoints.Count == 0)
+        {
+            inpaintStatus = "Paint over an area first.";
+            return;
+        }
+
+        inpaintStatus = "Inpainting...";
+        StateHasChanged();
+        await Task.Yield();
+
+        using var mask = new Mat(inpaintSrcMat.Size(), MatType.CV_8UC1, Scalar.Black);
+        foreach (var p in inpaintMaskPoints)
+            Cv2.Circle(mask, p, 8, Scalar.White, thickness: -1);
+
+        using var result = new Mat();
+        Cv2.Inpaint(inpaintSrcMat, mask, result, 5, InpaintTypes.Telea);
+
+        await inpaintResultCanvasClient.DrawMatAsync(result);
+        inpaintStatus = "Done - the painted area was filled in from its surroundings.";
+    }
+}

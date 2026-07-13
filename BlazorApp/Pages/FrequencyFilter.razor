@@ -1,0 +1,252 @@
+@page "/samples/frequency-filter"
+
+@using OpenCvSharp
+@inject IJSRuntime jsRuntime
+@inject HttpClient httpClient
+@implements IDisposable
+
+<PageTitle>Frequency Filter</PageTitle>
+
+<h1>Frequency Filter (DFT)</h1>
+
+<p>
+    <code>Cv2.Dft</code> turns a photo into its frequency spectrum - low frequencies (broad shapes,
+    lighting) cluster in the center after shifting, high frequencies (edges, fine texture) spread
+    outward. Drag the radius slider to keep or remove a circular band of frequencies, then
+    <code>Cv2.Idft</code> converts it back to a real, viewable image - something a plain canvas
+    filter has no equivalent for.
+</p>
+
+<div>
+    <PhotoPicker OnFileSelected="OnPhotoSelectedAsync" OnReset="ResetToDefaultAsync" />
+</div>
+<p><em>@status</em></p>
+
+<div style="display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap;">
+    <div>
+        <canvas @ref="srcCanvas" width="@CanvasSize" height="@CanvasSize" style="border:1px solid gray;"></canvas>
+        <p><small>Source</small></p>
+    </div>
+    <div>
+        <div style="position:relative; width:@(CanvasSize)px; height:@(CanvasSize)px;">
+            <canvas @ref="spectrumCanvas" width="@CanvasSize" height="@CanvasSize" style="position:absolute; left:0; top:0; border:1px solid gray;"></canvas>
+            <svg style="position:absolute; left:0; top:0; pointer-events:none;" width="@CanvasSize" height="@CanvasSize">
+                <circle cx="@(CanvasSize / 2)" cy="@(CanvasSize / 2)" r="@radius" fill="none" stroke="yellow" stroke-width="2" />
+            </svg>
+        </div>
+        <p><small>Magnitude spectrum (shifted)</small></p>
+    </div>
+    <div>
+        <canvas @ref="resultCanvas" width="@CanvasSize" height="@CanvasSize" style="border:1px solid gray;"></canvas>
+        <p><small>Filtered result</small></p>
+    </div>
+</div>
+
+<div style="display:flex; gap:1rem; align-items:center; margin-top:0.5rem; flex-wrap:wrap;">
+    <label><input type="radio" name="freqMode" checked="@lowPass" @onchange="@(() => SetModeAsync(true))" /> Low-pass (keep center)</label>
+    <label><input type="radio" name="freqMode" checked="@(!lowPass)" @onchange="@(() => SetModeAsync(false))" /> High-pass (remove center)</label>
+    <label>Radius</label>
+    <input type="range" min="2" max="@(CanvasSize / 2)" @bind="radius" @bind:event="oninput" @bind:after="ApplyFilterAsync" />
+    <span>@radius</span>
+</div>
+
+@code {
+    private const int CanvasSize = 256;
+
+    private Mat? srcMat;
+    private byte[]? defaultBytes;
+    private ElementReference srcCanvas;
+    private ElementReference spectrumCanvas;
+    private ElementReference resultCanvas;
+    private CanvasClient? srcCanvasClient;
+    private CanvasClient? spectrumCanvasClient;
+    private CanvasClient? resultCanvasClient;
+
+    // Cached FFT-shifted complex planes for the current photo, reused across slider changes.
+    private Mat? shiftedRe;
+    private Mat? shiftedIm;
+    private int paddedRows;
+    private int paddedCols;
+
+    private int radius = 30;
+    private bool lowPass = true;
+    private string status = "";
+
+    public void Dispose()
+    {
+        srcMat?.Dispose();
+        shiftedRe?.Dispose();
+        shiftedIm?.Dispose();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        srcCanvasClient ??= new CanvasClient(jsRuntime, srcCanvas);
+        spectrumCanvasClient ??= new CanvasClient(jsRuntime, spectrumCanvas);
+        resultCanvasClient ??= new CanvasClient(jsRuntime, resultCanvas);
+
+        defaultBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
+        await LoadPhotoAsync(Mat.FromImageData(defaultBytes));
+    }
+
+    private async Task OnPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            var newMat = await ImageLoader.LoadFromFileAsync(jsRuntime, file, CanvasSize);
+            status = "";
+            await LoadPhotoAsync(newMat);
+        }
+        catch (Exception ex)
+        {
+            status = $"Couldn't load that image: {ex.Message}";
+        }
+    }
+
+    private async Task ResetToDefaultAsync()
+    {
+        if (defaultBytes is null)
+            return;
+
+        status = "";
+        await LoadPhotoAsync(Mat.FromImageData(defaultBytes));
+    }
+
+    private async Task LoadPhotoAsync(Mat photo)
+    {
+        srcMat?.Dispose();
+        srcMat = photo;
+        await srcCanvasClient!.DrawMatAsync(srcMat);
+
+        ComputeSpectrum();
+        await DrawSpectrumAsync();
+        await ApplyFilterAsync();
+    }
+
+    // Computes the padded, FFT-shifted complex DFT planes once per photo; slider changes only
+    // re-run the (cheap) masking + inverse transform against these cached planes.
+    private void ComputeSpectrum()
+    {
+        shiftedRe?.Dispose();
+        shiftedIm?.Dispose();
+
+        using var gray = new Mat();
+        Cv2.CvtColor(srcMat!, gray, ColorConversionCodes.BGR2GRAY);
+
+        paddedRows = Cv2.GetOptimalDFTSize(gray.Rows);
+        paddedCols = Cv2.GetOptimalDFTSize(gray.Cols);
+        using var padded = new Mat();
+        Cv2.CopyMakeBorder(gray, padded, 0, paddedRows - gray.Rows, 0, paddedCols - gray.Cols, BorderTypes.Constant, Scalar.Black);
+        using var paddedFloat = new Mat();
+        padded.ConvertTo(paddedFloat, MatType.CV_32FC1);
+
+        using var zeros = Mat.Zeros(paddedFloat.Size(), MatType.CV_32FC1).ToMat();
+        using var complex = new Mat();
+        Cv2.Merge(new[] { paddedFloat, zeros }, complex);
+
+        using var dftResult = new Mat();
+        Cv2.Dft(complex, dftResult, DftFlags.ComplexOutput);
+
+        var planes = Cv2.Split(dftResult);
+        shiftedRe = planes[0];
+        shiftedIm = planes[1];
+        ShiftQuadrants(shiftedRe);
+        ShiftQuadrants(shiftedIm);
+    }
+
+    private async Task DrawSpectrumAsync()
+    {
+        if (shiftedRe is null || shiftedIm is null || spectrumCanvasClient is null)
+            return;
+
+        using var magnitude = new Mat();
+        Cv2.Magnitude(shiftedRe, shiftedIm, magnitude);
+        using var magPlusOne = new Mat();
+        Cv2.Add(magnitude, Scalar.All(1), magPlusOne);
+        using var logMag = new Mat();
+        Cv2.Log(magPlusOne, logMag);
+
+        using var normalized = new Mat();
+        Cv2.Normalize(logMag, normalized, 0, 255, NormTypes.MinMax);
+        using var byteMag = new Mat();
+        normalized.ConvertTo(byteMag, MatType.CV_8UC1);
+
+        using var colored = new Mat();
+        Cv2.ApplyColorMap(byteMag, colored, ColormapTypes.Viridis);
+
+        using var display = new Mat();
+        Cv2.Resize(colored, display, new Size(CanvasSize, CanvasSize));
+        await spectrumCanvasClient.DrawMatAsync(display);
+    }
+
+    private async Task SetModeAsync(bool newLowPass)
+    {
+        lowPass = newLowPass;
+        await ApplyFilterAsync();
+    }
+
+    private async Task ApplyFilterAsync()
+    {
+        if (shiftedRe is null || shiftedIm is null || srcMat is null || resultCanvasClient is null)
+            return;
+
+        using var re = shiftedRe.Clone();
+        using var im = shiftedIm.Clone();
+
+        using var mask = BuildCircularMask(re.Size(), radius, lowPass);
+        Cv2.Multiply(re, mask, re);
+        Cv2.Multiply(im, mask, im);
+
+        ShiftQuadrants(re);
+        ShiftQuadrants(im);
+
+        using var complex = new Mat();
+        Cv2.Merge(new[] { re, im }, complex);
+
+        using var inverted = new Mat();
+        Cv2.Idft(complex, inverted, DftFlags.RealOutput | DftFlags.Scale);
+
+        using var cropped = new Mat(inverted, new Rect(0, 0, srcMat.Width, srcMat.Height));
+        using var normalized = new Mat();
+        Cv2.Normalize(cropped, normalized, 0, 255, NormTypes.MinMax);
+        using var display = new Mat();
+        normalized.ConvertTo(display, MatType.CV_8UC1);
+
+        await resultCanvasClient.DrawMatAsync(display);
+    }
+
+    private static Mat BuildCircularMask(Size size, int radius, bool lowPass)
+    {
+        var mask = new Mat(size, MatType.CV_32FC1, Scalar.All(lowPass ? 0 : 1));
+        var center = new Point(size.Width / 2, size.Height / 2);
+        Cv2.Circle(mask, center, radius, Scalar.All(lowPass ? 1 : 0), thickness: -1);
+        return mask;
+    }
+
+    // Swaps quadrants so the DFT's zero-frequency term moves from the corners to the center
+    // (the standard "fftshift"); applying it twice restores the original arrangement.
+    private static void ShiftQuadrants(Mat mat)
+    {
+        var cx = mat.Cols / 2;
+        var cy = mat.Rows / 2;
+
+        using var q0 = new Mat(mat, new Rect(0, 0, cx, cy));
+        using var q1 = new Mat(mat, new Rect(cx, 0, cx, cy));
+        using var q2 = new Mat(mat, new Rect(0, cy, cx, cy));
+        using var q3 = new Mat(mat, new Rect(cx, cy, cx, cy));
+
+        using var tmp = new Mat();
+        q0.CopyTo(tmp);
+        q3.CopyTo(q0);
+        tmp.CopyTo(q3);
+
+        q1.CopyTo(tmp);
+        q2.CopyTo(q1);
+        tmp.CopyTo(q2);
+    }
+}

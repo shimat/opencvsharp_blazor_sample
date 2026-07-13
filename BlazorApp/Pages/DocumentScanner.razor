@@ -1,0 +1,229 @@
+@page "/samples/document-scanner"
+@using OpenCvSharp
+@inject IJSRuntime jsRuntime
+@inject HttpClient httpClient
+@implements IDisposable
+
+<PageTitle>Document Scanner</PageTitle>
+
+<h1>Document Scanner</h1>
+
+<p>
+    A perspective warp turns a photo taken at an angle into a flat, top-down scan - something no
+    CSS transform can do, because it needs to solve for the real quadrilateral the page occupies
+    in the photo. <code>FindContours</code> + <code>ApproxPolyDP</code> make an initial guess at
+    the four corners below; drag the yellow handles to correct it - the straightened result
+    updates as you go.
+</p>
+
+<div style="display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap;">
+    <div style="position:relative; width:@(CanvasSize)px; height:@(CanvasSize)px;"
+         @onmousedown="OnMouseDown" @onmousemove="OnMouseMove" @onmouseup="OnMouseUp" @onmouseleave="OnMouseUp">
+        <canvas @ref="srcCanvas" width="@CanvasSize" height="@CanvasSize" style="position:absolute; left:0; top:0; border:1px solid gray;"></canvas>
+        <svg style="position:absolute; left:0; top:0; pointer-events:none;" width="@CanvasSize" height="@CanvasSize">
+            <polygon points="@PolygonPoints" fill="rgba(255,220,0,0.15)" stroke="yellow" stroke-width="2" />
+            @for (var i = 0; i < corners.Length; i++)
+            {
+                <circle cx="@corners[i].X" cy="@corners[i].Y" r="7" fill="yellow" stroke="black" stroke-width="1" />
+            }
+        </svg>
+    </div>
+    <canvas @ref="resultCanvas" width="@OutputWidth" height="@OutputHeight" style="border:1px solid gray;"></canvas>
+</div>
+
+<p><em>@status</em></p>
+
+@code {
+    private const int CanvasSize = 320;
+    private const int OutputWidth = 220;
+    private const int OutputHeight = 300;
+
+    private Mat? srcMat;
+    private ElementReference srcCanvas;
+    private ElementReference resultCanvas;
+    private CanvasClient? srcCanvasClient;
+    private CanvasClient? resultCanvasClient;
+
+    private Point2f[] corners = new Point2f[4];
+    private int? draggingIndex;
+    private string status = "Drag the yellow corners to match the page.";
+
+    private string PolygonPoints => string.Join(" ", corners.Select(c => $"{c.X},{c.Y}"));
+
+    public void Dispose() => srcMat?.Dispose();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        srcMat = GenerateSyntheticPhoto();
+        corners = DetectDocumentCorners(srcMat) ?? new[]
+        {
+            new Point2f(70, 45), new Point2f(260, 30),
+            new Point2f(245, 290), new Point2f(55, 265),
+        };
+
+        srcCanvasClient ??= new CanvasClient(jsRuntime, srcCanvas);
+        resultCanvasClient ??= new CanvasClient(jsRuntime, resultCanvas);
+
+        await srcCanvasClient.DrawMatAsync(srcMat);
+        await Straighten();
+        StateHasChanged();
+    }
+
+    private void OnMouseDown(MouseEventArgs e)
+    {
+        var x = (float)e.OffsetX;
+        var y = (float)e.OffsetY;
+        for (var i = 0; i < corners.Length; i++)
+        {
+            if (Math.Abs(corners[i].X - x) < 14 && Math.Abs(corners[i].Y - y) < 14)
+            {
+                draggingIndex = i;
+                return;
+            }
+        }
+    }
+
+    private void OnMouseMove(MouseEventArgs e)
+    {
+        if (draggingIndex is not int idx)
+            return;
+
+        var x = Math.Clamp((float)e.OffsetX, 0f, (float)CanvasSize);
+        var y = Math.Clamp((float)e.OffsetY, 0f, (float)CanvasSize);
+        corners[idx] = new Point2f(x, y);
+    }
+
+    private async Task OnMouseUp(MouseEventArgs e)
+    {
+        if (draggingIndex is null)
+            return;
+
+        draggingIndex = null;
+        await Straighten();
+    }
+
+    private async Task Straighten()
+    {
+        if (srcMat is null || resultCanvasClient is null)
+            return;
+
+        var dst = new[]
+        {
+            new Point2f(0, 0), new Point2f(OutputWidth, 0),
+            new Point2f(OutputWidth, OutputHeight), new Point2f(0, OutputHeight),
+        };
+
+        using var m = Cv2.GetPerspectiveTransform(corners, dst);
+        using var result = new Mat();
+        Cv2.WarpPerspective(srcMat, result, m, new Size(OutputWidth, OutputHeight));
+
+        await resultCanvasClient.DrawMatAsync(result);
+        status = "Looks good - drag a corner to adjust further.";
+    }
+
+    // Builds a synthetic "photo of a tilted document on a desk" so the sample is fully
+    // self-contained (no extra binary asset to license/attribute).
+    private static Mat GenerateSyntheticPhoto()
+    {
+        const int docWidth = 180;
+        const int docHeight = 240;
+
+        var background = new Mat(new Size(CanvasSize, CanvasSize), MatType.CV_8UC3, new Scalar(90, 60, 40));
+
+        var rng = new Random(42);
+        for (var i = 0; i < 40; i++)
+        {
+            var p1 = new Point(rng.Next(CanvasSize), rng.Next(CanvasSize));
+            var p2 = new Point(p1.X + rng.Next(-15, 15), p1.Y + rng.Next(-15, 15));
+            Cv2.Line(background, p1, p2, new Scalar(100, 70, 48), 1);
+        }
+
+        using var doc = new Mat(new Size(docWidth, docHeight), MatType.CV_8UC3, Scalar.White);
+        Cv2.Rectangle(doc, new Rect(0, 0, docWidth, docHeight), new Scalar(210, 210, 210), thickness: 2);
+        Cv2.Rectangle(doc, new Rect(16, 16, docWidth - 32, 12), new Scalar(30, 30, 30), thickness: -1);
+        for (var y = 44; y < docHeight - 20; y += 18)
+        {
+            Cv2.Line(doc, new Point(16, y), new Point(docWidth - 16, y), new Scalar(60, 60, 60), 2);
+        }
+
+        var srcCorners = new[]
+        {
+            new Point2f(0, 0), new Point2f(docWidth, 0),
+            new Point2f(docWidth, docHeight), new Point2f(0, docHeight),
+        };
+        var dstCorners = new[]
+        {
+            new Point2f(70, 45), new Point2f(260, 30),
+            new Point2f(245, 290), new Point2f(55, 265),
+        };
+
+        using var m = Cv2.GetPerspectiveTransform(srcCorners, dstCorners);
+        using var warpedDoc = new Mat();
+        Cv2.WarpPerspective(doc, warpedDoc, m, background.Size());
+
+        using var docMask = new Mat(doc.Size(), MatType.CV_8UC1, Scalar.All(255));
+        using var warpedMask = new Mat();
+        Cv2.WarpPerspective(docMask, warpedMask, m, background.Size());
+
+        warpedDoc.CopyTo(background, warpedMask);
+        return background;
+    }
+
+    // Auto-detects the document's quadrilateral as an initial guess for the drag handles - the
+    // largest 4-point contour found in the edge map. Falls back to null (caller uses a fixed
+    // default) if nothing convincing is found.
+    private static Point2f[]? DetectDocumentCorners(Mat colorMat)
+    {
+        using var gray = new Mat();
+        Cv2.CvtColor(colorMat, gray, ColorConversionCodes.BGR2GRAY);
+        using var blurred = new Mat();
+        Cv2.GaussianBlur(gray, blurred, new Size(5, 5), 0);
+        using var edges = new Mat();
+        Cv2.Canny(blurred, edges, 50, 150);
+        using var dilated = new Mat();
+        using var kernel = new Mat();
+        Cv2.Dilate(edges, dilated, kernel, iterations: 1);
+
+        Cv2.FindContours(dilated, out var contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+
+        double maxArea = 0;
+        Point[]? best = null;
+        foreach (var contour in contours)
+        {
+            var area = Cv2.ContourArea(contour);
+            if (area < 1000)
+                continue;
+
+            var peri = Cv2.ArcLength(contour, true);
+            var approx = Cv2.ApproxPolyDP(contour, 0.02 * peri, true);
+            if (approx.Length == 4 && area > maxArea)
+            {
+                maxArea = area;
+                best = approx;
+            }
+        }
+
+        if (best is null)
+            return null;
+
+        return OrderCorners(best.Select(p => new Point2f(p.X, p.Y)).ToArray());
+    }
+
+    // Orders 4 arbitrary corner points as [top-left, top-right, bottom-right, bottom-left] using
+    // the standard sum/difference trick (top-left has the smallest x+y, bottom-right the largest).
+    private static Point2f[] OrderCorners(Point2f[] pts)
+    {
+        return new[]
+        {
+            pts.OrderBy(p => p.X + p.Y).First(),
+            pts.OrderByDescending(p => p.X - p.Y).First(),
+            pts.OrderByDescending(p => p.X + p.Y).First(),
+            pts.OrderBy(p => p.X - p.Y).First(),
+        };
+    }
+}

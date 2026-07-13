@@ -1,0 +1,171 @@
+@page "/samples/aruco"
+@using OpenCvSharp
+@using OpenCvSharp.Aruco
+@inject IJSRuntime jsRuntime
+@implements IDisposable
+
+<PageTitle>ArUco Marker Detection</PageTitle>
+
+<h1>ArUco Marker Detection</h1>
+
+<p>
+    ArUco markers are the fiducial tags behind most AR overlays and robot-vision setups - a
+    library both generates the tag image and, given a photo of it at any rotation, tells you which
+    marker it is and exactly where its four corners are. The marker below is generated on the fly,
+    then composited onto a background at a random angle and position; <code>ArucoDetector</code>
+    finds it and reports the ID.
+</p>
+
+<div style="display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap;">
+    <div>
+        <canvas @ref="srcCanvas" width="@CanvasSize" height="@CanvasSize" style="border:1px solid gray;"></canvas>
+        <p><small>Composited photo</small></p>
+    </div>
+    <div>
+        <canvas @ref="resultCanvas" width="@CanvasSize" height="@CanvasSize" style="border:1px solid gray;"></canvas>
+        <p><small>Detection result</small></p>
+    </div>
+</div>
+
+<div>
+    <button @onclick="RegeneratePhotoAsync">Regenerate photo</button>
+    <button @onclick="DetectAsync">Detect</button>
+</div>
+<p><em>@status</em></p>
+
+@code {
+    private const int CanvasSize = 300;
+    private const int MarkerPixels = 100;
+    private const int QuietZone = 20;
+    private const int MarkerId = 7;
+
+    private ElementReference srcCanvas;
+    private ElementReference resultCanvas;
+    private CanvasClient? srcCanvasClient;
+    private CanvasClient? resultCanvasClient;
+    private Dictionary? dictionary;
+    private Mat? composite;
+    private string status = "";
+
+    public void Dispose()
+    {
+        dictionary?.Dispose();
+        composite?.Dispose();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        dictionary = Cv2.Aruco.GetPredefinedDictionary(PredefinedDictionaryType.Dict4X4_50);
+        srcCanvasClient ??= new CanvasClient(jsRuntime, srcCanvas);
+        resultCanvasClient ??= new CanvasClient(jsRuntime, resultCanvas);
+
+        await RegeneratePhotoAsync();
+        StateHasChanged();
+    }
+
+    private async Task RegeneratePhotoAsync()
+    {
+        if (dictionary is null || srcCanvasClient is null)
+            return;
+
+        composite?.Dispose();
+        composite = GenerateComposite(dictionary);
+        await srcCanvasClient.DrawMatAsync(composite);
+        status = "Click \"Detect\" to run ArucoDetector on this photo.";
+    }
+
+    private async Task DetectAsync()
+    {
+        if (dictionary is null || composite is null || resultCanvasClient is null)
+            return;
+
+        using var detector = new ArucoDetector(dictionary);
+        detector.DetectMarkers(composite, out var corners, out var ids, out _);
+
+        using var result = new Mat();
+        composite.CopyTo(result);
+
+        if (ids.Length > 0)
+        {
+            // Draw the outline manually rather than calling Cv2.Aruco.DrawDetectedMarkers: that
+            // helper labels each marker via cv::putText, which crashes on this wasm build with a
+            // "memory access out of bounds" inside cv::FontFace - likely a missing font resource
+            // (the build has no freetype support). The ID is reported in the status line instead.
+            foreach (var markerCorners in corners)
+            {
+                for (var i = 0; i < markerCorners.Length; i++)
+                {
+                    var p1 = (Point)markerCorners[i];
+                    var p2 = (Point)markerCorners[(i + 1) % markerCorners.Length];
+                    Cv2.Line(result, p1, p2, Scalar.LimeGreen, thickness: 2);
+                }
+                Cv2.Circle(result, (Point)markerCorners[0], 5, Scalar.Red, thickness: -1);
+            }
+            status = $"Detected marker ID {string.Join(", ", ids)}.";
+        }
+        else
+        {
+            status = "No marker detected.";
+        }
+
+        await resultCanvasClient.DrawMatAsync(result);
+    }
+
+    // Renders the marker, pads it with a white quiet zone, then warps it onto a textured
+    // background at a random rotation and position to stand in for "a photo of a printed tag".
+    private static Mat GenerateComposite(Dictionary dictionary)
+    {
+        using var markerImg = new Mat();
+        dictionary.GenerateImageMarker(MarkerId, MarkerPixels, markerImg, borderBits: 1);
+
+        var paddedSize = MarkerPixels + QuietZone * 2;
+        using var paddedMarker = new Mat(new Size(paddedSize, paddedSize), MatType.CV_8UC1, Scalar.All(255));
+        using (var markerRoi = new Mat(paddedMarker, new Rect(QuietZone, QuietZone, MarkerPixels, MarkerPixels)))
+        {
+            markerImg.CopyTo(markerRoi);
+        }
+
+        using var markerColor = new Mat();
+        Cv2.CvtColor(paddedMarker, markerColor, ColorConversionCodes.GRAY2BGR);
+
+        var rng = new Random();
+        var angle = rng.Next(-40, 40);
+        var half = paddedSize / 2.0;
+        var margin = paddedSize / 2 + 10;
+        var centerX = rng.Next(margin, CanvasSize - margin);
+        var centerY = rng.Next(margin, CanvasSize - margin);
+
+        using var m = Cv2.GetRotationMatrix2D(new Point2f((float)half, (float)half), angle, 1.0);
+        m.Set(0, 2, m.Get<double>(0, 2) + (centerX - half));
+        m.Set(1, 2, m.Get<double>(1, 2) + (centerY - half));
+
+        using var warpedMarker = new Mat();
+        Cv2.WarpAffine(markerColor, warpedMarker, m, new Size(CanvasSize, CanvasSize), borderValue: Scalar.All(255));
+
+        using var markerMaskSrc = new Mat(markerColor.Size(), MatType.CV_8UC1, Scalar.All(255));
+        using var warpedMask = new Mat();
+        Cv2.WarpAffine(markerMaskSrc, warpedMask, m, new Size(CanvasSize, CanvasSize));
+
+        var background = GenerateBackground();
+        warpedMarker.CopyTo(background, warpedMask);
+        return background;
+    }
+
+    private static Mat GenerateBackground()
+    {
+        var background = new Mat(new Size(CanvasSize, CanvasSize), MatType.CV_8UC3, new Scalar(200, 200, 200));
+        var rng = new Random(7);
+        for (var i = 0; i < 25; i++)
+        {
+            var p1 = new Point(rng.Next(CanvasSize), rng.Next(CanvasSize));
+            var p2 = new Point(p1.X + rng.Next(-10, 10), p1.Y + rng.Next(-10, 10));
+            Cv2.Line(background, p1, p2, new Scalar(180, 180, 180), 1);
+        }
+        return background;
+    }
+}

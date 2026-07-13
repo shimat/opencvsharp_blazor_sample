@@ -29,9 +29,9 @@ namespace BlazorApp
             await jsRuntime.InvokeVoidAsync("stopWebcam", videoElement);
         }
 
-        public async Task<byte[]> CaptureFrameAsync()
+        public async Task<byte[]> CaptureFrameAsync(int? targetWidth = null, int? targetHeight = null)
         {
-            return await jsRuntime.InvokeAsync<byte[]>("captureFrame", videoElement, captureCanvasElement);
+            return await jsRuntime.InvokeAsync<byte[]>("captureFrame", videoElement, captureCanvasElement, targetWidth, targetHeight);
         }
     }
 }

@@ -1,6 +1,6 @@
 # opencvsharp_blazor_sample
 
-## 🚀 [Live demo](https://shimat.github.io/opencvsharp_blazor_sample/opencvsharp_sample)
+## 🚀 [Live demo](https://shimat.github.io/opencvsharp_blazor_sample/)
 
 Code samples showing [OpenCvSharp](https://github.com/shimat/opencvsharp) running entirely in the browser via Blazor WebAssembly. All image processing happens client-side, on-device, via WebAssembly — no server involved, no image ever leaves the browser.
 
@@ -10,10 +10,27 @@ Code samples showing [OpenCvSharp](https://github.com/shimat/opencvsharp) runnin
 |---|---|
 | `/` | Landing page |
 | `/build-info` | `Cv2.GetBuildInformation()` output for the OpenCV build compiled into this app |
-| `/opencvsharp_sample` | Loads a test image and runs a few basic `Cv2` operations on it (pseudo-color, threshold, Canny edge detection), drawing the results to an HTML5 `<canvas>` |
+| `/samples/pseudo-color` | Applies a false-color palette to a grayscale photo with `Cv2.ApplyColorMap`, switchable between colormaps |
+| `/samples/threshold` | Binarizes a photo with `Cv2.Threshold`, either a manual slider cutoff or Otsu's automatic threshold |
+| `/samples/canny-edges` | Tunes Canny's two hysteresis thresholds live to see which edges survive |
+| `/samples/frequency-filter` | Visualizes a photo's DFT magnitude spectrum and applies a circular low-pass/high-pass mask before `Cv2.Idft` |
 | `/samples/features` | AKAZE keypoint detection, plus feature matching between an image and a rotated copy of itself |
-| `/samples/detection` | Real-time face detection against a live webcam feed using a Haar cascade classifier (see known issue below) |
+| `/samples/template-matching` | Drag out a patch and find every place it matches elsewhere in the photo with `Cv2.MatchTemplate` |
+| `/samples/detection` | Real-time face detection against a live webcam feed using a Haar cascade classifier |
+| `/samples/aruco` | Generates an ArUco marker and composites it onto a photo at a random position/rotation, then detects it |
+| `/samples/color-tracking` | Tunes an HSV range live and tracks the largest matching blob in the webcam feed with `Cv2.InRange` + `FindContours` |
+| `/samples/optical-flow` | Tracks corner points frame-to-frame in the webcam feed with `Cv2.CalcOpticalFlowPyrLK` |
 | `/samples/interactive` | Drag a rectangle over an image to run `Cv2.GrabCut` and extract the foreground |
+| `/samples/watershed-hough` | Live `HoughLinesP`/`HoughCircles` tuning with sliders, plus interactive marker-based `Cv2.Watershed` segmentation |
+| `/samples/shape-analysis` | Draw a shape and see its convex hull, rotated bounding box, and polygon approximation at once |
+| `/samples/distance-transform` | Paint a blob and visualize how far every pixel is from its nearest edge with `Cv2.DistanceTransform` |
+| `/samples/skeleton` | Paint a blob and erode it down to a 1-pixel-wide skeleton with `Cv2.XImgProc.Thinning` |
+| `/samples/document-scanner` | Auto-detects a tilted document's corners with `FindContours`/`ApproxPolyDP`, then straightens it with a perspective warp after manual correction |
+| `/samples/photo-editing` | Drag-to-place `Cv2.SeamlessClone` blending compared against a naive paste, plus paint-to-remove `Cv2.Inpaint` |
+| `/samples/pyramid-blend` | Blends two photos across a seam using Laplacian pyramids instead of a hard cut |
+| `/samples/stitching` | Stitches two overlapping photos into one panorama with `Cv2.Stitcher`; stitching is a known-issue preview (see below) |
+
+Most photo-based samples default to a bundled test image, but accept any uploaded photo via a file picker (normalized to a fixed size, with a button to reset back to the default) - the synthetic-image samples (Document Scanner, Watershed & Hough's Hough half, ArUco) don't offer this since they need their specific generated content to demonstrate the algorithm.
 
 ## Stack
 
@@ -42,5 +59,8 @@ The current wasm-tools toolchain has a couple of rough edges around statically l
 - AOT-compiling `OpenCvSharp.dll` crashes the Mono AOT compiler ([#8](https://github.com/shimat/opencvsharp_blazor_sample/issues/8)) — worked around by excluding just that assembly from AOT compilation. That exclusion in turn breaks loading any component with an OpenCvSharp-typed field ([#11](https://github.com/shimat/opencvsharp_blazor_sample/issues/11)), so Release publish currently runs with AOT off entirely until one of the two issues is resolved upstream
 - The bundled `wasm-opt` predates some binaryen features Release publish needs ([dotnet/runtime#114723](https://github.com/dotnet/runtime/issues/114723)) — worked around by swapping in a newer build during CI publish
 - `OpenCvSharp5.runtime.wasm` ships its native lib as `libOpenCvSharpExtern.a`, but the managed side declares `[LibraryImport("OpenCvSharpExtern")]` (no `lib` prefix); the wasm toolchain derives the P/Invoke module name from the file name verbatim, so this mismatch leaves the P/Invoke table empty ([opencvsharp#2039](https://github.com/shimat/opencvsharp/issues/2039)) — worked around by re-referencing a locally renamed copy of the `.a` file before native build
-- Any algorithm that internally allocates a `cv::UMat` (e.g. `ORB`, `CascadeClassifier.DetectMultiScale`) hangs or hard-aborts, because `cv::ocl::haveOpenCL()` throws instead of returning `false` on this wasm build ([opencvsharp#2037](https://github.com/shimat/opencvsharp/issues/2037)) — the root cause is a missing `-DWITH_OPENCL=OFF` in OpenCvSharp's wasm build CMake configuration, so it can't be worked around from this app. The `/samples/features` page avoids this by using AKAZE instead of ORB; the `/samples/detection` page (which needs `CascadeClassifier`) is kept as a preview with an on-page notice, pending an upstream fix
+- `cv::ocl::haveOpenCL()` used to throw instead of returning `false` on this wasm build, hanging or hard-aborting any algorithm that internally allocates a `cv::UMat` (e.g. `ORB`, `CascadeClassifier.DetectMultiScale`, `Aruco.ArucoDetector.DetectMarkers`, `Cv2.Stitcher.Stitch`) ([opencvsharp#2037](https://github.com/shimat/opencvsharp/issues/2037)) — fixed upstream in [opencvsharp#2041](https://github.com/shimat/opencvsharp/pull/2041), confirmed resolved as of `OpenCvSharp5`/`OpenCvSharp5.runtime.wasm` `5.0.0.20260712`
 - `Cv2.DrawMatches`' P/Invoke signature crashes the Mono interpreter (`OpenCvSharp.dll` runs interpreted on this wasm build, per the AOT-exclusion workaround above) ([opencvsharp#2040](https://github.com/shimat/opencvsharp/issues/2040)) — the `/samples/features` page works around this by drawing match correspondence lines manually instead of calling `Cv2.DrawMatches`
+- `Cv2.Aruco.DrawDetectedMarkers` crashes with "memory access out of bounds" inside `cv::FontFace` (likely missing freetype/font support in this build) — the `/samples/aruco` page works around this by drawing each marker's outline and corner manually instead
+- This wasm build's OpenCV has no JPEG (or PNG) codec — `Cv2.GetBuildInformation()` on `/build-info` lists no JPEG entry under Media I/O, and `Mat.FromImageData` silently returns an empty `Mat` for a byte-for-byte valid JPEG/PNG (no exception) — only BMP decodes. The "upload your own photo" feature works around this by re-encoding the uploaded image as an uncompressed BMP in JavaScript ([`imageloader-bmp.js`](BlazorApp/wwwroot/js/imageloader-bmp.js)) before handing it to OpenCV
+- `Cv2.Stitcher.Stitch` aborts this wasm build with a `cv::gemm` assertion failure deep in the bundle adjustment step, followed by an unrecoverable WASM trap ([opencvsharp_blazor_sample#12](https://github.com/shimat/opencvsharp_blazor_sample/issues/12), not yet root-caused as a core OpenCV bug vs. a usage issue) — the `/samples/stitching` page keeps its "Stitch" button disabled and documents this inline

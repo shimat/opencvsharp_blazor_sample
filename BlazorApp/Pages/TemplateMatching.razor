@@ -1,0 +1,173 @@
+@page "/samples/template-matching"
+@using OpenCvSharp
+@inject IJSRuntime jsRuntime
+@inject HttpClient httpClient
+@implements IDisposable
+
+<PageTitle>Template Matching</PageTitle>
+
+<h1>Template Matching</h1>
+
+<p>
+    Drag a rectangle to pick a small patch of the photo as a template, then
+    <code>Cv2.MatchTemplate</code> slides it across the whole image and scores how well it
+    correlates at every position - the slider marks every location that scores above threshold,
+    which is how repeated textures or patterns get found automatically.
+</p>
+
+<div>
+    <PhotoPicker OnFileSelected="OnPhotoSelectedAsync" OnReset="ResetToDefaultAsync" />
+</div>
+
+<div style="position:relative; width:@(CanvasSize)px; height:@(CanvasSize)px;"
+     @onmousedown="OnMouseDown" @onmousemove="OnMouseMove" @onmouseup="OnMouseUp" @onmouseleave="OnMouseUp">
+    <canvas @ref="srcCanvas" width="@CanvasSize" height="@CanvasSize" style="position:absolute; left:0; top:0; border:1px solid gray;"></canvas>
+    @if (isDragging)
+    {
+        <div style="position:absolute; pointer-events:none; border:2px dashed yellow; left:@(RectLeft)px; top:@(RectTop)px; width:@(RectWidth)px; height:@(RectHeight)px;"></div>
+    }
+</div>
+
+<div style="display:flex; gap:0.75rem; align-items:center; margin-top:0.5rem;">
+    <label>Match threshold</label>
+    <input type="range" min="50" max="99" @bind="thresholdPercent" @bind:event="oninput" @bind:after="RunMatchAsync" />
+    <span>@(thresholdPercent / 100.0)</span>
+</div>
+<p><em>@status</em></p>
+
+@code {
+    private const int CanvasSize = 256;
+
+    private Mat? srcMat;
+    private byte[]? defaultBytes;
+    private ElementReference srcCanvas;
+    private CanvasClient? srcCanvasClient;
+
+    private bool isDragging;
+    private double startX, startY, currentX, currentY;
+    private Rect? templateRect;
+    private int thresholdPercent = 85;
+    private string status = "Drag a rectangle around a distinctive patch to search for it.";
+
+    private double RectLeft => Math.Min(startX, currentX);
+    private double RectTop => Math.Min(startY, currentY);
+    private double RectWidth => Math.Abs(currentX - startX);
+    private double RectHeight => Math.Abs(currentY - startY);
+
+    public void Dispose() => srcMat?.Dispose();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        srcCanvasClient ??= new CanvasClient(jsRuntime, srcCanvas);
+        defaultBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
+        await LoadPhotoAsync(Mat.FromImageData(defaultBytes));
+    }
+
+    private async Task OnPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            var newMat = await ImageLoader.LoadFromFileAsync(jsRuntime, file, CanvasSize);
+            await LoadPhotoAsync(newMat);
+        }
+        catch (Exception ex)
+        {
+            status = $"Couldn't load that image: {ex.Message}";
+        }
+    }
+
+    private async Task ResetToDefaultAsync()
+    {
+        if (defaultBytes is null)
+            return;
+
+        await LoadPhotoAsync(Mat.FromImageData(defaultBytes));
+    }
+
+    private async Task LoadPhotoAsync(Mat photo)
+    {
+        srcMat?.Dispose();
+        srcMat = photo;
+        templateRect = null;
+        isDragging = false;
+        status = "Drag a rectangle around a distinctive patch to search for it.";
+        await srcCanvasClient!.DrawMatAsync(srcMat);
+    }
+
+    private void OnMouseDown(MouseEventArgs e)
+    {
+        isDragging = true;
+        startX = currentX = e.OffsetX;
+        startY = currentY = e.OffsetY;
+    }
+
+    private void OnMouseMove(MouseEventArgs e)
+    {
+        if (!isDragging)
+            return;
+
+        currentX = e.OffsetX;
+        currentY = e.OffsetY;
+    }
+
+    private async Task OnMouseUp(MouseEventArgs e)
+    {
+        if (!isDragging)
+            return;
+
+        isDragging = false;
+        currentX = e.OffsetX;
+        currentY = e.OffsetY;
+
+        var rect = new Rect((int)RectLeft, (int)RectTop, (int)RectWidth, (int)RectHeight);
+        var imageBounds = new Rect(0, 0, srcMat!.Width, srcMat.Height);
+        rect = rect.Intersect(imageBounds);
+        if (rect.Width < 12 || rect.Height < 12)
+        {
+            status = "Selection too small - drag a bigger rectangle.";
+            return;
+        }
+
+        templateRect = rect;
+        await RunMatchAsync();
+    }
+
+    private async Task RunMatchAsync()
+    {
+        if (srcMat is null || templateRect is null || srcCanvasClient is null)
+            return;
+
+        var rect = templateRect.Value;
+        using var srcGray = new Mat();
+        Cv2.CvtColor(srcMat, srcGray, ColorConversionCodes.BGR2GRAY);
+        using var templateGray = new Mat(srcGray, rect);
+
+        using var result = new Mat();
+        Cv2.MatchTemplate(srcGray, templateGray, result, TemplateMatchModes.CCoeffNormed);
+
+        var threshold = thresholdPercent / 100.0;
+        using var mask = new Mat();
+        Cv2.Threshold(result, mask, threshold, 1.0, ThresholdTypes.Binary);
+        using var mask8u = new Mat();
+        mask.ConvertTo(mask8u, MatType.CV_8UC1, 255);
+
+        Cv2.FindContours(mask8u, out var contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+        var matchPositions = contours.Select(c => Cv2.BoundingRect(c)).ToList();
+
+        using var display = new Mat();
+        srcMat.CopyTo(display);
+        foreach (var m in matchPositions)
+        {
+            Cv2.Rectangle(display, new Rect(m.X, m.Y, rect.Width, rect.Height), Scalar.LimeGreen, thickness: 2);
+        }
+        Cv2.Rectangle(display, rect, Scalar.Yellow, thickness: 2);
+
+        await srcCanvasClient.DrawMatAsync(display);
+        status = $"Found {matchPositions.Count} match(es) at threshold {threshold:0.00} (yellow = your selection, green = matches).";
+    }
+}

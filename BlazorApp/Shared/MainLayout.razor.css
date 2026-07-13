@@ -9,7 +9,12 @@ main {
 }
 
 .sidebar {
+    flex-shrink: 0;
     background-image: linear-gradient(180deg, rgb(5, 39, 103) 0%, #3a0647 70%);
+}
+
+main {
+    min-width: 0;
 }
 
 .top-row {
@@ -60,6 +65,7 @@ main {
         height: 100vh;
         position: sticky;
         top: 0;
+        overflow-y: auto;
     }
 
     .top-row {

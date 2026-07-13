@@ -20,40 +20,69 @@
             </NavLink>
         </div>
 
-        <div class="nav-category-header">Basic Processing</div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="opencvsharp_sample">
-                <span class="nav-icon icon-sliders" aria-hidden="true"></span> Filters
-            </NavLink>
-        </div>
-
-        <div class="nav-category-header">Feature Matching</div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="samples/features">
-                <span class="nav-icon icon-match" aria-hidden="true"></span> Keypoints &amp; Matching
-            </NavLink>
-        </div>
-
-        <div class="nav-category-header">Object Detection</div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="samples/detection">
-                <span class="nav-icon icon-viewfinder" aria-hidden="true"></span> Live Face Detection
-            </NavLink>
-        </div>
-
-        <div class="nav-category-header">Interactive</div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="samples/interactive">
-                <span class="nav-icon icon-cursor" aria-hidden="true"></span> GrabCut Segmentation
-            </NavLink>
-        </div>
+        @foreach (var group in SampleCatalog.ByCategory)
+        {
+            var category = group.Key;
+            <button type="button" class="nav-category-header" @onclick="() => ToggleCategory(category)" @onclick:stopPropagation="true">
+                <span class="nav-category-chevron @(IsExpanded(category) ? "expanded" : "")" aria-hidden="true"></span>
+                @category
+            </button>
+            <div class="nav-category-body @(IsExpanded(category) ? "expanded" : "")">
+                @foreach (var sample in group)
+                {
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="@sample.Route">
+                            <span class="nav-icon icon-@sample.Icon" aria-hidden="true"></span> @sample.Title
+                        </NavLink>
+                    </div>
+                }
+            </div>
+        }
     </nav>
 </div>
 
+@implements IDisposable
 @code {
+    [Inject] private NavigationManager NavigationManager { get; set; } = default!;
+
     private bool collapseNavMenu = true;
+    private readonly HashSet<string> expandedCategories = new();
 
     private string? NavMenuCssClass => collapseNavMenu ? "collapse" : null;
+
+    protected override void OnInitialized()
+    {
+        NavigationManager.LocationChanged += OnLocationChanged;
+        expandedCategories.Add(GetCurrentCategory() ?? SampleCatalog.Samples[0].Category);
+    }
+
+    // Keeps the current page's category expanded after client-side navigation - OnInitialized only
+    // runs once for this component's lifetime, so without this a category other than the one
+    // active on first load never auto-expands.
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        var category = GetCurrentCategory();
+        if (category is not null && expandedCategories.Add(category))
+            InvokeAsync(StateHasChanged);
+    }
+
+    private string? GetCurrentCategory()
+    {
+        var currentRoute = NavigationManager.ToBaseRelativePath(NavigationManager.Uri).TrimEnd('/');
+        return SampleCatalog.Samples.FirstOrDefault(s => s.Route == currentRoute)?.Category;
+    }
+
+    public void Dispose() => NavigationManager.LocationChanged -= OnLocationChanged;
+
+    private bool IsExpanded(string category) => expandedCategories.Contains(category);
+
+    private void ToggleCategory(string category)
+    {
+        if (!expandedCategories.Add(category))
+        {
+            expandedCategories.Remove(category);
+        }
+    }
 
     private void ToggleNavMenu()
     {

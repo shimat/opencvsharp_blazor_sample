@@ -1,0 +1,16 @@
+<span style="display:inline-flex; gap:0.5rem; align-items:center;">
+    <InputFile OnChange="HandleChange" accept="image/*" />
+    <button type="button" @onclick="HandleReset">Reset to default</button>
+</span>
+
+@code {
+    [Parameter]
+    public EventCallback<IBrowserFile> OnFileSelected { get; set; }
+
+    [Parameter]
+    public EventCallback OnReset { get; set; }
+
+    private Task HandleChange(InputFileChangeEventArgs e) => OnFileSelected.InvokeAsync(e.File);
+
+    private Task HandleReset() => OnReset.InvokeAsync();
+}
