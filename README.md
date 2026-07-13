@@ -17,6 +17,7 @@ Code samples showing [OpenCvSharp](https://github.com/shimat/opencvsharp) runnin
 | `/samples/features` | AKAZE keypoint detection, plus feature matching between an image and a rotated copy of itself |
 | `/samples/template-matching` | Drag out a patch and find every place it matches elsewhere in the photo with `Cv2.MatchTemplate` |
 | `/samples/detection` | Real-time face detection against a live webcam feed using a Haar cascade classifier |
+| `/samples/dnn-detection` | Real-time face detection and landmark localization against a live webcam feed using the YuNet ONNX model via `Cv2.Dnn` |
 | `/samples/aruco` | Generates an ArUco marker and composites it onto a photo at a random position/rotation, then detects it |
 | `/samples/color-tracking` | Tunes an HSV range live and tracks the largest matching blob in the webcam feed with `Cv2.InRange` + `FindContours` |
 | `/samples/optical-flow` | Tracks corner points frame-to-frame in the webcam feed with `Cv2.CalcOpticalFlowPyrLK` |
