@@ -1,16 +1,17 @@
-@page "/samples/detection"
+@page "/samples/dnn-detection"
 @using OpenCvSharp
 @inject IJSRuntime jsRuntime
 @inject HttpClient httpClient
 @implements IAsyncDisposable
 
-<PageTitle>Live Face Detection (Haar Cascade)</PageTitle>
+<PageTitle>DNN Face Detection (YuNet)</PageTitle>
 
-<h1>Live Face Detection (Haar Cascade)</h1>
+<h1>DNN Face Detection (YuNet)</h1>
 
 <p>
-    Grants access to your webcam and runs a Haar cascade face detector against the live video,
-    entirely in the browser - nothing is uploaded anywhere.
+    Runs <code>Cv2.FaceDetectorYN</code> - a small ONNX neural network, not a Haar cascade -
+    against a live webcam feed entirely in the browser, drawing both the face box and its five
+    landmark points (eyes, nose tip, mouth corners).
 </p>
 
 <video @ref="videoElement" autoplay muted playsinline style="display:none"></video>
@@ -27,12 +28,18 @@
     private const int FrameWidth = 480;
     private const int FrameHeight = 360;
 
+    // FaceDetectorYN.Create bakes the input size into the model, and this build has no
+    // SetInputSize binding to change it afterward - so every captured frame must be exactly
+    // this size, which webcam.js's captureFrame already guarantees by drawing straight at
+    // (FrameWidth, FrameHeight) instead of the camera's native resolution.
+    private static readonly Size DetectorInputSize = new(FrameWidth, FrameHeight);
+
     private ElementReference videoElement;
     private ElementReference captureCanvas;
     private ElementReference resultCanvas;
     private WebcamClient? webcamClient;
     private CanvasClient? resultCanvasClient;
-    private CascadeClassifier? cascade;
+    private FaceDetectorYN? detector;
     private CancellationTokenSource? cts;
     private Task? loopTask;
     private bool running;
@@ -49,15 +56,15 @@
         resultCanvasClient ??= new CanvasClient(jsRuntime, resultCanvas);
     }
 
-    private async Task EnsureCascadeLoadedAsync()
+    private async Task EnsureDetectorLoadedAsync()
     {
-        if (cascade is not null)
+        if (detector is not null)
             return;
 
-        var bytes = await httpClient.GetByteArrayAsync("models/haarcascade_frontalface_default.xml");
-        const string path = "haarcascade_frontalface_default.xml";
-        await File.WriteAllBytesAsync(path, bytes);
-        cascade = new CascadeClassifier(path);
+        var modelBytes = await httpClient.GetByteArrayAsync("models/face_detection_yunet_2023mar.onnx");
+        const string modelPath = "face_detection_yunet_2023mar.onnx";
+        await File.WriteAllBytesAsync(modelPath, modelBytes);
+        detector = FaceDetectorYN.Create(modelPath, "", DetectorInputSize);
     }
 
     private async Task StartAsync()
@@ -69,7 +76,7 @@
         statusMessage = "Requesting camera access...";
         try
         {
-            await EnsureCascadeLoadedAsync();
+            await EnsureDetectorLoadedAsync();
             await webcamClient.StartAsync();
         }
         catch (Exception ex)
@@ -122,7 +129,7 @@
 
     private async Task CaptureAndDetectOnceAsync()
     {
-        if (webcamClient is null || resultCanvasClient is null || cascade is null)
+        if (webcamClient is null || resultCanvasClient is null || detector is null)
             return;
 
         var frameBytes = await webcamClient.CaptureFrameAsync(FrameWidth, FrameHeight);
@@ -131,17 +138,53 @@
 
         using var colorMat = Mat.FromImageData(frameBytes);
 
-        using var grayMat = new Mat();
-        Cv2.CvtColor(colorMat, grayMat, ColorConversionCodes.BGR2GRAY);
+        using var faces = new Mat();
+        detector.Detect(colorMat, faces);
 
-        var faces = cascade.DetectMultiScale(grayMat);
-        foreach (var face in faces)
+        // Each row is [x, y, w, h, then 5 (x, y) landmark pairs, then a confidence score] - see
+        // https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet. Bail out if
+        // this build's dnn engine ever returns a different column count instead of trusting it -
+        // reading past the Mat's actual columns is a native out-of-bounds access, not a
+        // catchable .NET exception, on this wasm build.
+        const int expectedCols = 15;
+        if (faces.Cols != 0 && faces.Cols != expectedCols)
+            return;
+
+        var imageBounds = new Rect(0, 0, colorMat.Width, colorMat.Height);
+        for (var i = 0; i < faces.Rows; i++)
         {
-            Cv2.Rectangle(colorMat, face, Scalar.LimeGreen, thickness: 3);
+            var x = faces.At<float>(i, 0);
+            var y = faces.At<float>(i, 1);
+            var w = faces.At<float>(i, 2);
+            var h = faces.At<float>(i, 3);
+            if (!IsFinite(x) || !IsFinite(y) || !IsFinite(w) || !IsFinite(h))
+                continue;
+
+            var rect = new Rect((int)x, (int)y, (int)w, (int)h).Intersect(imageBounds);
+            if (rect.Width <= 0 || rect.Height <= 0)
+                continue;
+
+            Cv2.Rectangle(colorMat, rect, Scalar.LimeGreen, thickness: 2);
+
+            for (var landmark = 0; landmark < 5; landmark++)
+            {
+                var lx = faces.At<float>(i, 4 + landmark * 2);
+                var ly = faces.At<float>(i, 4 + landmark * 2 + 1);
+                if (!IsFinite(lx) || !IsFinite(ly))
+                    continue;
+
+                var point = new Point((int)lx, (int)ly);
+                if (point.X < 0 || point.Y < 0 || point.X >= colorMat.Width || point.Y >= colorMat.Height)
+                    continue;
+
+                Cv2.Circle(colorMat, point, radius: 2, Scalar.Yellow, thickness: -1);
+            }
         }
 
         await resultCanvasClient.DrawMatAsync(colorMat);
     }
+
+    private static bool IsFinite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
 
     public async ValueTask DisposeAsync()
     {
@@ -153,7 +196,7 @@
         }
         if (loopTask is not null)
             await loopTask;
-        cascade?.Dispose();
+        detector?.Dispose();
         cts?.Dispose();
     }
 }

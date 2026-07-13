@@ -61,10 +61,17 @@ namespace BlazorApp.Shared
                 new[] { "Interactive" }),
             new SampleInfo(
                 "samples/detection",
-                "Live Face Detection",
+                "Live Face Detection (Haar Cascade)",
                 "Object Detection",
                 "viewfinder",
                 "Real-time face detection against a live webcam feed using a Haar cascade classifier.",
+                new[] { "Realtime", "Webcam" }),
+            new SampleInfo(
+                "samples/dnn-detection",
+                "DNN Face Detection (YuNet)",
+                "Object Detection",
+                "neural-net",
+                "Real-time face detection and landmark localization against a live webcam feed using the YuNet ONNX model via Cv2.Dnn.",
                 new[] { "Realtime", "Webcam" }),
             new SampleInfo(
                 "samples/aruco",

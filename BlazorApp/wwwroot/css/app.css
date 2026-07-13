@@ -83,6 +83,7 @@ a, .btn-link {
 .icon-heatmap { background-image: url('../icons/heatmap.svg'); }
 .icon-pyramid { background-image: url('../icons/pyramid.svg'); }
 .icon-panorama { background-image: url('../icons/panorama.svg'); }
+.icon-neural-net { background-image: url('../icons/neural-net.svg'); }
 
 .sample-category-title {
     margin-top: 2rem;
