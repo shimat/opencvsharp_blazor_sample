@@ -1,0 +1,232 @@
+@page "/samples/color-tracking"
+@using OpenCvSharp
+@inject IJSRuntime jsRuntime
+@implements IAsyncDisposable
+
+<PageTitle>Color Tracking</PageTitle>
+
+<h1>Color Tracking</h1>
+
+<p>
+    Converts the live webcam feed to HSV and keeps only pixels within the tuned range via
+    <code>Cv2.InRange</code>, then <code>FindContours</code> picks out the largest matching blob -
+    a live color-based object tracker, not just a filter. <strong>Click anywhere on the video</strong>
+    to sample that color and track it; the sliders below are for fine-tuning afterward.
+</p>
+
+<video @ref="videoElement" autoplay muted playsinline style="display:none"></video>
+<canvas @ref="captureCanvas" style="display:none"></canvas>
+<canvas @ref="resultCanvas" width="480" height="360" style="border:1px solid gray; cursor:crosshair;" @onclick="OnResultCanvasClick"></canvas>
+
+<div>
+    <button @onclick="StartAsync" disabled="@running">Start</button>
+    <button @onclick="StopAsync" disabled="@(!running)">Stop</button>
+</div>
+<p>@statusMessage</p>
+
+<div style="display:grid; grid-template-columns:auto 1fr auto; gap:0.4rem 0.75rem; max-width:420px; align-items:center;">
+    <label>Hue min</label>
+    <input type="range" min="0" max="179" @bind="hMin" @bind:event="oninput" />
+    <span>@hMin</span>
+
+    <label>Hue max</label>
+    <input type="range" min="0" max="179" @bind="hMax" @bind:event="oninput" />
+    <span>@hMax</span>
+
+    <label>Saturation min</label>
+    <input type="range" min="0" max="255" @bind="sMin" @bind:event="oninput" />
+    <span>@sMin</span>
+
+    <label>Saturation max</label>
+    <input type="range" min="0" max="255" @bind="sMax" @bind:event="oninput" />
+    <span>@sMax</span>
+
+    <label>Value min</label>
+    <input type="range" min="0" max="255" @bind="vMin" @bind:event="oninput" />
+    <span>@vMin</span>
+
+    <label>Value max</label>
+    <input type="range" min="0" max="255" @bind="vMax" @bind:event="oninput" />
+    <span>@vMax</span>
+</div>
+
+@code {
+    private const int FrameWidth = 480;
+    private const int FrameHeight = 360;
+
+    private ElementReference videoElement;
+    private ElementReference captureCanvas;
+    private ElementReference resultCanvas;
+    private WebcamClient? webcamClient;
+    private CanvasClient? resultCanvasClient;
+    private CancellationTokenSource? cts;
+    private Task? loopTask;
+    private bool running;
+    private string statusMessage = "";
+    private Mat? lastFrame;
+
+    // Default range tuned for a fairly saturated green object.
+    private int hMin = 40;
+    private int hMax = 80;
+    private int sMin = 60;
+    private int sMax = 255;
+    private int vMin = 60;
+    private int vMax = 255;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        webcamClient ??= new WebcamClient(jsRuntime, videoElement, captureCanvas);
+        resultCanvasClient ??= new CanvasClient(jsRuntime, resultCanvas);
+    }
+
+    private async Task StartAsync()
+    {
+        if (running || webcamClient is null)
+            return;
+
+        running = true;
+        statusMessage = "Requesting camera access...";
+        try
+        {
+            await webcamClient.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"Couldn't start the camera: {ex.Message}";
+            running = false;
+            return;
+        }
+
+        statusMessage = "";
+        cts = new CancellationTokenSource();
+        loopTask = RunLoopAsync(cts.Token);
+    }
+
+    private async Task StopAsync()
+    {
+        if (!running)
+            return;
+
+        running = false;
+        cts?.Cancel();
+
+        if (webcamClient is not null)
+            await webcamClient.StopAsync();
+    }
+
+    private async Task RunLoopAsync(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                await CaptureAndTrackOnceAsync();
+            }
+            catch
+            {
+                // Ignore a transient capture/tracking failure and keep the loop alive.
+            }
+
+            try
+            {
+                await Task.Delay(30, token);
+            }
+            catch (TaskCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
+    private async Task CaptureAndTrackOnceAsync()
+    {
+        if (webcamClient is null || resultCanvasClient is null)
+            return;
+
+        var frameBytes = await webcamClient.CaptureFrameAsync(FrameWidth, FrameHeight);
+        if (frameBytes.Length == 0)
+            return;
+
+        using var colorMat = Mat.FromImageData(frameBytes);
+
+        lastFrame?.Dispose();
+        lastFrame = colorMat.Clone();
+
+        using var hsv = new Mat();
+        Cv2.CvtColor(colorMat, hsv, ColorConversionCodes.BGR2HSV);
+
+        using var mask = new Mat();
+        Cv2.InRange(hsv, new Scalar(hMin, sMin, vMin), new Scalar(hMax, sMax, vMax), mask);
+
+        using var kernel = new Mat();
+        using var cleaned = new Mat();
+        Cv2.Erode(mask, cleaned, kernel, iterations: 2);
+        Cv2.Dilate(cleaned, cleaned, kernel, iterations: 2);
+
+        Cv2.FindContours(cleaned, out var contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+        if (contours.Length > 0)
+        {
+            var largest = contours.OrderByDescending(c => Cv2.ContourArea(c)).First();
+            if (Cv2.ContourArea(largest) > 200)
+            {
+                var rect = Cv2.BoundingRect(largest);
+                var moments = Cv2.Moments(largest);
+                var centerX = (int)(moments.M10 / moments.M00);
+                var centerY = (int)(moments.M01 / moments.M00);
+
+                Cv2.Rectangle(colorMat, rect, Scalar.LimeGreen, thickness: 2);
+                Cv2.Circle(colorMat, new Point(centerX, centerY), 6, Scalar.Red, thickness: -1);
+            }
+        }
+
+        await resultCanvasClient.DrawMatAsync(colorMat);
+    }
+
+    // Samples the HSV of whatever pixel the user clicked in the most recent frame, and sets the
+    // tracking range to a tolerance band around it - picking a color by eye is far easier than
+    // guessing at six abstract H/S/V slider values with no visual feedback.
+    private void OnResultCanvasClick(MouseEventArgs e)
+    {
+        if (lastFrame is null)
+            return;
+
+        var x = (int)e.OffsetX;
+        var y = (int)e.OffsetY;
+        if (x < 0 || y < 0 || x >= lastFrame.Width || y >= lastFrame.Height)
+            return;
+
+        using var hsvFrame = new Mat();
+        Cv2.CvtColor(lastFrame, hsvFrame, ColorConversionCodes.BGR2HSV);
+        var pixel = hsvFrame.Get<Vec3b>(y, x);
+
+        const int hueTolerance = 12;
+        const int satValTolerance = 70;
+        hMin = Math.Clamp(pixel.Item0 - hueTolerance, 0, 179);
+        hMax = Math.Clamp(pixel.Item0 + hueTolerance, 0, 179);
+        sMin = Math.Clamp(pixel.Item1 - satValTolerance, 0, 255);
+        sMax = Math.Clamp(pixel.Item1 + satValTolerance, 0, 255);
+        vMin = Math.Clamp(pixel.Item2 - satValTolerance, 0, 255);
+        vMax = Math.Clamp(pixel.Item2 + satValTolerance, 0, 255);
+
+        statusMessage = $"Tracking the color near H={pixel.Item0}, S={pixel.Item1}, V={pixel.Item2} - adjust the sliders to fine-tune.";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        cts?.Cancel();
+        if (running && webcamClient is not null)
+        {
+            await webcamClient.StopAsync();
+            running = false;
+        }
+        if (loopTask is not null)
+            await loopTask;
+        cts?.Dispose();
+        lastFrame?.Dispose();
+    }
+}

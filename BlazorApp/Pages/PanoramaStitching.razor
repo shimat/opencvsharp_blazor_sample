@@ -1,0 +1,206 @@
+@page "/samples/stitching"
+@using OpenCvSharp
+@inject IJSRuntime jsRuntime
+@inject HttpClient httpClient
+@implements IDisposable
+
+<PageTitle>Panorama Stitching</PageTitle>
+
+<h1>Panorama Stitching</h1>
+
+<p>
+    <code>Cv2.Stitcher</code> finds overlapping features between separate photos, estimates how
+    the cameras were positioned relative to each other, and warps + blends the images into one
+    panorama - the default pair below is two overlapping crops of the same photo, standing in for
+    two photos taken side by side. Replace either with your own overlapping photos to try it for
+    real.
+</p>
+
+<div style="border:1px solid #e0a800; background:#fff3cd; color:#664d03; padding:0.75rem 1rem; border-radius:4px; margin-bottom:1rem;">
+    <strong>Known issue:</strong> running the stitcher currently aborts this WebAssembly build.
+    <code>Cv2.Stitcher.Stitch</code> hits the same underlying problem as
+    <a href="samples/aruco">ArUco detection</a> - it internally probes for OpenCL support via
+    <code>cv::UMat</code>, and that probe aborts the WASM runtime instead of cleanly reporting
+    "unavailable" (see
+    <a href="https://github.com/shimat/opencvsharp/issues/2037" target="_blank">shimat/opencvsharp#2037</a>,
+    fix in progress in
+    <a href="https://github.com/shimat/opencvsharp/pull/2041" target="_blank">shimat/opencvsharp#2041</a>).
+    Loading the source photos works fine - only the "Stitch" button below is affected, kept here
+    as a preview pending the upstream fix landing in a released package.
+</div>
+
+<div style="display:flex; gap:1.5rem; flex-wrap:wrap;">
+    <div>
+        <p><strong>Left photo</strong></p>
+        <canvas @ref="leftCanvas" width="@LeftWidth" height="@CanvasSize" style="border:1px solid gray;"></canvas>
+        <PhotoPicker OnFileSelected="OnLeftPhotoSelectedAsync" OnReset="ResetLeftAsync" />
+    </div>
+    <div>
+        <p><strong>Right photo</strong></p>
+        <canvas @ref="rightCanvas" width="@RightWidth" height="@CanvasSize" style="border:1px solid gray;"></canvas>
+        <PhotoPicker OnFileSelected="OnRightPhotoSelectedAsync" OnReset="ResetRightAsync" />
+    </div>
+</div>
+
+<div>
+    <button @onclick="StitchAsync">Stitch</button>
+</div>
+<p><em>@status</em></p>
+
+<canvas @ref="resultCanvas" width="@ResultWidth" height="@ResultHeight" style="border:1px solid gray;"></canvas>
+
+@code {
+    private const int CanvasSize = 256;
+    private const int LeftWidth = 180;
+    private const int RightWidth = 156;
+    private const int ResultWidth = 500;
+    private const int ResultHeight = 260;
+
+    private Mat? leftMat;
+    private Mat? rightMat;
+    private byte[]? defaultBytes;
+    private ElementReference leftCanvas;
+    private ElementReference rightCanvas;
+    private ElementReference resultCanvas;
+    private CanvasClient? leftCanvasClient;
+    private CanvasClient? rightCanvasClient;
+    private CanvasClient? resultCanvasClient;
+    private string status = "";
+
+    public void Dispose()
+    {
+        leftMat?.Dispose();
+        rightMat?.Dispose();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        leftCanvasClient ??= new CanvasClient(jsRuntime, leftCanvas);
+        rightCanvasClient ??= new CanvasClient(jsRuntime, rightCanvas);
+        resultCanvasClient ??= new CanvasClient(jsRuntime, resultCanvas);
+
+        defaultBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
+        using var full = Mat.FromImageData(defaultBytes);
+        (leftMat, rightMat) = SplitOverlapping(full);
+
+        await leftCanvasClient.DrawMatAsync(leftMat);
+        await rightCanvasClient.DrawMatAsync(rightMat);
+        await ClearResultAsync();
+    }
+
+    // Two overlapping crops of the same photo - an 80px-wide shared band gives the stitcher
+    // enough common features to match, standing in for "two photos of the same scene".
+    private static (Mat left, Mat right) SplitOverlapping(Mat source)
+    {
+        var left = new Mat(source, new Rect(0, 0, LeftWidth, source.Rows)).Clone();
+        var right = new Mat(source, new Rect(source.Cols - RightWidth, 0, RightWidth, source.Rows)).Clone();
+        return (left, right);
+    }
+
+    private async Task OnLeftPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            var newMat = await ImageLoader.LoadFromFileAsync(jsRuntime, file, CanvasSize);
+            leftMat?.Dispose();
+            leftMat = newMat;
+            status = "";
+            await leftCanvasClient!.DrawMatAsync(leftMat);
+        }
+        catch (Exception ex)
+        {
+            status = $"Couldn't load that image: {ex.Message}";
+        }
+    }
+
+    private async Task OnRightPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            var newMat = await ImageLoader.LoadFromFileAsync(jsRuntime, file, CanvasSize);
+            rightMat?.Dispose();
+            rightMat = newMat;
+            status = "";
+            await rightCanvasClient!.DrawMatAsync(rightMat);
+        }
+        catch (Exception ex)
+        {
+            status = $"Couldn't load that image: {ex.Message}";
+        }
+    }
+
+    private async Task ResetLeftAsync()
+    {
+        if (defaultBytes is null)
+            return;
+
+        using var full = Mat.FromImageData(defaultBytes);
+        leftMat?.Dispose();
+        leftMat = new Mat(full, new Rect(0, 0, LeftWidth, full.Rows)).Clone();
+        await leftCanvasClient!.DrawMatAsync(leftMat);
+    }
+
+    private async Task ResetRightAsync()
+    {
+        if (defaultBytes is null)
+            return;
+
+        using var full = Mat.FromImageData(defaultBytes);
+        rightMat?.Dispose();
+        rightMat = new Mat(full, new Rect(full.Cols - RightWidth, 0, RightWidth, full.Rows)).Clone();
+        await rightCanvasClient!.DrawMatAsync(rightMat);
+    }
+
+    private async Task ClearResultAsync()
+    {
+        using var blank = new Mat(new Size(ResultWidth, ResultHeight), MatType.CV_8UC3, Scalar.All(30));
+        await resultCanvasClient!.DrawMatAsync(blank);
+    }
+
+    private async Task StitchAsync()
+    {
+        if (leftMat is null || rightMat is null || resultCanvasClient is null)
+            return;
+
+        status = "Stitching...";
+        StateHasChanged();
+        await Task.Yield();
+
+        using var stitcher = Stitcher.Create(Stitcher.Mode.Panorama);
+        using var pano = new Mat();
+        var result = stitcher.Stitch(new[] { leftMat, rightMat }, pano);
+
+        if (result == Stitcher.Status.OK && !pano.Empty())
+        {
+            using var fitted = FitToBox(pano, ResultWidth, ResultHeight);
+            await resultCanvasClient.DrawMatAsync(fitted);
+            status = "Stitched successfully.";
+        }
+        else
+        {
+            status = $"Stitching failed: {result}";
+            await ClearResultAsync();
+        }
+    }
+
+    private static Mat FitToBox(Mat src, int maxWidth, int maxHeight)
+    {
+        var scale = Math.Min((double)maxWidth / src.Width, (double)maxHeight / src.Height);
+        var newSize = new Size(Math.Max(1, (int)(src.Width * scale)), Math.Max(1, (int)(src.Height * scale)));
+
+        using var resized = new Mat();
+        Cv2.Resize(src, resized, newSize);
+
+        var canvas = new Mat(new Size(maxWidth, maxHeight), src.Type(), Scalar.All(30));
+        var x = (maxWidth - newSize.Width) / 2;
+        var y = (maxHeight - newSize.Height) / 2;
+        using var roi = new Mat(canvas, new Rect(x, y, newSize.Width, newSize.Height));
+        resized.CopyTo(roi);
+        return canvas;
+    }
+}

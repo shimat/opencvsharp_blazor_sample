@@ -60,3 +60,92 @@ a, .btn-link {
     .blazor-error-boundary::after {
         content: "An error has occurred."
     }
+
+/* Icon-to-image mapping, shared by the nav menu (NavMenu.razor.css sizes ".nav-icon") and the
+   landing page's sample cards (this file sizes ".sample-card-icon") so both can reuse one glyph
+   set without duplicating background-image rules. */
+.icon-home { background-image: url('../icons/home.svg'); }
+.icon-info { background-image: url('../icons/info.svg'); }
+.icon-sliders { background-image: url('../icons/sliders.svg'); }
+.icon-match { background-image: url('../icons/match.svg'); }
+.icon-viewfinder { background-image: url('../icons/viewfinder.svg'); }
+.icon-cursor { background-image: url('../icons/cursor.svg'); }
+.icon-perspective { background-image: url('../icons/perspective.svg'); }
+.icon-waves { background-image: url('../icons/waves.svg'); }
+.icon-blend { background-image: url('../icons/blend.svg'); }
+.icon-marker { background-image: url('../icons/marker.svg'); }
+.icon-spectrum { background-image: url('../icons/spectrum.svg'); }
+.icon-target-box { background-image: url('../icons/target-box.svg'); }
+.icon-eyedropper { background-image: url('../icons/eyedropper.svg'); }
+.icon-motion { background-image: url('../icons/motion.svg'); }
+.icon-polygon { background-image: url('../icons/polygon.svg'); }
+.icon-skeleton-line { background-image: url('../icons/skeleton-line.svg'); }
+.icon-heatmap { background-image: url('../icons/heatmap.svg'); }
+.icon-pyramid { background-image: url('../icons/pyramid.svg'); }
+.icon-panorama { background-image: url('../icons/panorama.svg'); }
+
+.sample-category-title {
+    margin-top: 2rem;
+    font-size: 1.1rem;
+}
+
+.sample-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 1rem;
+}
+
+.sample-card {
+    display: flex;
+    gap: 0.75rem;
+    padding: 1rem;
+    border: 1px solid #d7d7d7;
+    border-radius: 6px;
+    text-decoration: none;
+    color: inherit;
+    background: #fff;
+    transition: box-shadow 0.15s ease-in-out, transform 0.15s ease-in-out;
+}
+
+    .sample-card:hover {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        transform: translateY(-2px);
+        color: inherit;
+    }
+
+.sample-card-icon {
+    flex: none;
+    width: 2rem;
+    height: 2rem;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    opacity: 0.7;
+}
+
+.sample-card-body h3 {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+}
+
+.sample-card-body p {
+    margin: 0 0 0.5rem;
+    font-size: 0.85rem;
+    color: #555;
+}
+
+.sample-card-tags {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.sample-tag {
+    font-size: 0.7rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    background: #eef3f8;
+    color: #0071c1;
+}

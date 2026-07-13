@@ -13,6 +13,7 @@
 
 .nav-icon {
     display: inline-block;
+    flex-shrink: 0;
     width: 1.4rem;
     height: 1.4rem;
     margin-right: 0.5rem;
@@ -22,20 +23,50 @@
     background-size: contain;
 }
 
-.icon-home { background-image: url('icons/home.svg'); }
-.icon-info { background-image: url('icons/info.svg'); }
-.icon-sliders { background-image: url('icons/sliders.svg'); }
-.icon-match { background-image: url('icons/match.svg'); }
-.icon-viewfinder { background-image: url('icons/viewfinder.svg'); }
-.icon-cursor { background-image: url('icons/cursor.svg'); }
-
 .nav-category-header {
+    display: flex;
+    align-items: center;
+    width: 100%;
     padding: 0.75rem 1.5rem 0.25rem;
+    background: none;
+    border: none;
     font-size: 0.75rem;
     letter-spacing: 0.05em;
     text-transform: uppercase;
     color: rgba(255,255,255,0.5);
+    cursor: pointer;
 }
+
+    .nav-category-header:hover {
+        color: rgba(255,255,255,0.8);
+    }
+
+.nav-category-chevron {
+    display: inline-block;
+    width: 0;
+    height: 0;
+    margin-right: 0.5rem;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid currentColor;
+    transform: rotate(-90deg);
+    transition: transform 0.15s ease-in-out;
+}
+
+    .nav-category-chevron.expanded {
+        transform: rotate(0deg);
+    }
+
+.nav-category-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.2s ease-in-out;
+}
+
+    .nav-category-body.expanded {
+        /* Generous upper bound - no category currently has enough items to hit this ceiling. */
+        max-height: 30rem;
+    }
 
 .nav-item {
     font-size: 0.9rem;

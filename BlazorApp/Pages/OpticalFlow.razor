@@ -1,0 +1,189 @@
+@page "/samples/optical-flow"
+@using OpenCvSharp
+@inject IJSRuntime jsRuntime
+@implements IAsyncDisposable
+
+<PageTitle>Optical Flow</PageTitle>
+
+<h1>Optical Flow</h1>
+
+<p>
+    <code>GoodFeaturesToTrack</code> picks out corner-like points worth following, then
+    <code>Cv2.CalcOpticalFlowPyrLK</code> locates each one in the next frame - drawing where
+    every tracked point moved, frame to frame, something a static filter can't do since it needs
+    two frames and a notion of correspondence between them.
+</p>
+
+<video @ref="videoElement" autoplay muted playsinline style="display:none"></video>
+<canvas @ref="captureCanvas" style="display:none"></canvas>
+<canvas @ref="resultCanvas" width="480" height="360" style="border:1px solid gray;"></canvas>
+
+<div>
+    <button @onclick="StartAsync" disabled="@running">Start</button>
+    <button @onclick="StopAsync" disabled="@(!running)">Stop</button>
+</div>
+<p>@statusMessage</p>
+
+@code {
+    private const int FrameWidth = 480;
+    private const int FrameHeight = 360;
+    private const int MinTrackedPoints = 15;
+
+    private ElementReference videoElement;
+    private ElementReference captureCanvas;
+    private ElementReference resultCanvas;
+    private WebcamClient? webcamClient;
+    private CanvasClient? resultCanvasClient;
+    private CancellationTokenSource? cts;
+    private Task? loopTask;
+    private bool running;
+    private string statusMessage = "";
+
+    private Mat? prevGray;
+    private Point2f[] prevPoints = Array.Empty<Point2f>();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        webcamClient ??= new WebcamClient(jsRuntime, videoElement, captureCanvas);
+        resultCanvasClient ??= new CanvasClient(jsRuntime, resultCanvas);
+    }
+
+    private async Task StartAsync()
+    {
+        if (running || webcamClient is null)
+            return;
+
+        running = true;
+        statusMessage = "Requesting camera access...";
+        try
+        {
+            await webcamClient.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"Couldn't start the camera: {ex.Message}";
+            running = false;
+            return;
+        }
+
+        statusMessage = "";
+        prevGray?.Dispose();
+        prevGray = null;
+        prevPoints = Array.Empty<Point2f>();
+
+        cts = new CancellationTokenSource();
+        loopTask = RunLoopAsync(cts.Token);
+    }
+
+    private async Task StopAsync()
+    {
+        if (!running)
+            return;
+
+        running = false;
+        cts?.Cancel();
+
+        if (webcamClient is not null)
+            await webcamClient.StopAsync();
+    }
+
+    private async Task RunLoopAsync(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                await CaptureAndTrackOnceAsync();
+            }
+            catch
+            {
+                // Ignore a transient capture/tracking failure and keep the loop alive.
+            }
+
+            try
+            {
+                // Deliberately slower than the other webcam samples: optical flow needs visible
+                // motion between frames to draw arrows - sampling too fast makes consecutive
+                // frames nearly identical, so nothing appears to move.
+                await Task.Delay(400, token);
+            }
+            catch (TaskCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
+    private async Task CaptureAndTrackOnceAsync()
+    {
+        if (webcamClient is null || resultCanvasClient is null)
+            return;
+
+        var frameBytes = await webcamClient.CaptureFrameAsync(FrameWidth, FrameHeight);
+        if (frameBytes.Length == 0)
+            return;
+
+        using var colorMat = Mat.FromImageData(frameBytes);
+
+        var gray = new Mat();
+        Cv2.CvtColor(colorMat, gray, ColorConversionCodes.BGR2GRAY);
+
+        if (prevGray is null || prevPoints.Length < MinTrackedPoints)
+        {
+            prevGray?.Dispose();
+            prevGray = gray;
+            prevPoints = DetectFeatures(gray);
+            await resultCanvasClient.DrawMatAsync(colorMat);
+            return;
+        }
+
+        var nextPoints = Array.Empty<Point2f>();
+        byte[] status;
+        float[] err;
+        Cv2.CalcOpticalFlowPyrLK(prevGray, gray, prevPoints, ref nextPoints, out status, out err);
+
+        var survivingPoints = new List<Point2f>();
+        for (var i = 0; i < status.Length; i++)
+        {
+            if (status[i] == 0)
+                continue;
+
+            Cv2.Line(colorMat, (Point)prevPoints[i], (Point)nextPoints[i], Scalar.LimeGreen, thickness: 2);
+            Cv2.Circle(colorMat, (Point)nextPoints[i], 3, Scalar.Red, thickness: -1);
+            survivingPoints.Add(nextPoints[i]);
+        }
+
+        prevGray.Dispose();
+        prevGray = gray;
+        prevPoints = survivingPoints.Count >= MinTrackedPoints
+            ? survivingPoints.ToArray()
+            : DetectFeatures(gray);
+
+        await resultCanvasClient.DrawMatAsync(colorMat);
+    }
+
+    private static Point2f[] DetectFeatures(Mat gray)
+    {
+        using var noMask = new Mat();
+        return Cv2.GoodFeaturesToTrack(gray, maxCorners: 60, qualityLevel: 0.01, minDistance: 10, mask: noMask, blockSize: 7, useHarrisDetector: false, k: 0.04);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        cts?.Cancel();
+        if (running && webcamClient is not null)
+        {
+            await webcamClient.StopAsync();
+            running = false;
+        }
+        if (loopTask is not null)
+            await loopTask;
+        cts?.Dispose();
+        prevGray?.Dispose();
+    }
+}

@@ -1,4 +1,5 @@
 @page "/"
+@using BlazorApp.Shared
 
 <PageTitle>OpenCvSharp Blazor Sample</PageTitle>
 
@@ -9,10 +10,27 @@
     running entirely in the browser via Blazor WebAssembly - no server-side processing involved.
 </p>
 
-<ul>
-    <li><a href="build-info">Build Info</a> - the OpenCV build compiled into this app's WebAssembly binary</li>
-    <li><a href="opencvsharp_sample">Filters</a> - load an image and run a few basic OpenCV operations (pseudo-color, threshold, edge detection) on it</li>
-    <li><a href="samples/features">Keypoints &amp; Matching</a> - AKAZE keypoint detection and feature matching between two images</li>
-    <li><a href="samples/detection">Live Face Detection</a> - real-time face detection against a live webcam feed</li>
-    <li><a href="samples/interactive">GrabCut Segmentation</a> - drag a rectangle to extract the foreground from an image</li>
-</ul>
+<p><a href="build-info">Build Info</a> - the OpenCV build compiled into this app's WebAssembly binary.</p>
+
+@foreach (var group in SampleCatalog.ByCategory)
+{
+    <h2 class="sample-category-title">@group.Key</h2>
+    <div class="sample-grid">
+        @foreach (var sample in group)
+        {
+            <a class="sample-card" href="@sample.Route">
+                <span class="sample-card-icon icon-@sample.Icon" aria-hidden="true"></span>
+                <div class="sample-card-body">
+                    <h3>@sample.Title</h3>
+                    <p>@sample.Description</p>
+                    <div class="sample-card-tags">
+                        @foreach (var tag in sample.Tags)
+                        {
+                            <span class="sample-tag">@tag</span>
+                        }
+                    </div>
+                </div>
+            </a>
+        }
+    </div>
+}

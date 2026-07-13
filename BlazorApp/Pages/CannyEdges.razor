@@ -1,0 +1,112 @@
+@page "/samples/canny-edges"
+@using OpenCvSharp
+@inject IJSRuntime jsRuntime
+@inject HttpClient httpClient
+@implements IDisposable
+
+<PageTitle>Canny Edge Detection</PageTitle>
+
+<h1>Canny Edge Detection</h1>
+<p>
+    <code>Cv2.Canny</code> keeps an edge only if it's strong enough to clear the high threshold, or
+    if it's at least above the low threshold <em>and</em> connected to a pixel that cleared the
+    high one. Drag the sliders to see which edges survive.
+</p>
+
+<div>
+    <canvas @ref="srcCanvas" width="256" height="256" style="border:1px solid gray;"></canvas>
+    <canvas @ref="dstCanvas" width="256" height="256" style="border:1px solid gray;"></canvas>
+</div>
+
+<div style="display:grid; grid-template-columns:auto 1fr auto; gap:0.4rem 0.75rem; max-width:420px; align-items:center; margin-top:0.5rem;">
+    <label>Low threshold</label>
+    <input type="range" min="0" max="255" @bind="threshold1" @bind:event="oninput" @bind:after="RunAsync" />
+    <span>@threshold1</span>
+
+    <label>High threshold</label>
+    <input type="range" min="0" max="255" @bind="threshold2" @bind:event="oninput" @bind:after="RunAsync" />
+    <span>@threshold2</span>
+</div>
+
+<div style="margin-top:0.5rem;">
+    <PhotoPicker OnFileSelected="OnPhotoSelectedAsync" OnReset="ResetToDefaultAsync" />
+</div>
+<p><em>@photoStatus</em></p>
+
+@code {
+    private const int CanvasSize = 256;
+
+    private Mat? srcMat;
+    private byte[]? defaultBytes;
+    private ElementReference srcCanvas;
+    private ElementReference dstCanvas;
+    private CanvasClient? srcCanvasClient;
+    private CanvasClient? dstCanvasClient;
+    private int threshold1 = 32;
+    private int threshold2 = 128;
+    private string photoStatus = "";
+
+    public void Dispose() => srcMat?.Dispose();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        defaultBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
+        srcMat = Mat.FromImageData(defaultBytes);
+
+        srcCanvasClient ??= new CanvasClient(jsRuntime, srcCanvas);
+        dstCanvasClient ??= new CanvasClient(jsRuntime, dstCanvas);
+
+        await srcCanvasClient.DrawMatAsync(srcMat);
+        await RunAsync();
+    }
+
+    private async Task OnPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            var newMat = await ImageLoader.LoadFromFileAsync(jsRuntime, file, CanvasSize);
+            srcMat?.Dispose();
+            srcMat = newMat;
+            photoStatus = "";
+        }
+        catch (Exception ex)
+        {
+            photoStatus = $"Couldn't load that image: {ex.Message}";
+            return;
+        }
+
+        await srcCanvasClient!.DrawMatAsync(srcMat);
+        await RunAsync();
+    }
+
+    private async Task ResetToDefaultAsync()
+    {
+        if (defaultBytes is null)
+            return;
+
+        srcMat?.Dispose();
+        srcMat = Mat.FromImageData(defaultBytes);
+        photoStatus = "";
+
+        await srcCanvasClient!.DrawMatAsync(srcMat);
+        await RunAsync();
+    }
+
+    private async Task RunAsync()
+    {
+        if (srcMat is null || dstCanvasClient is null)
+            return;
+
+        using var grayMat = new Mat();
+        using var dstMat = new Mat();
+        Cv2.CvtColor(srcMat, grayMat, ColorConversionCodes.BGR2GRAY);
+        Cv2.Canny(grayMat, dstMat, threshold1, threshold2);
+
+        await dstCanvasClient.DrawMatAsync(dstMat);
+    }
+}

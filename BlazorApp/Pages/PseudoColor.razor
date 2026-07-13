@@ -1,0 +1,134 @@
+@page "/samples/pseudo-color"
+@using OpenCvSharp
+@inject IJSRuntime jsRuntime
+@inject HttpClient httpClient
+@implements IDisposable
+
+<PageTitle>Pseudo Color</PageTitle>
+
+<h1>Pseudo Color</h1>
+<p>
+    <code>Cv2.ApplyColorMap</code> maps a grayscale intensity to a color from a palette, turning
+    brightness differences that are subtle in grayscale into differences that are obvious in color.
+</p>
+
+<div>
+    <canvas @ref="srcCanvas" width="256" height="256" style="border:1px solid gray;"></canvas>
+    <canvas @ref="dstCanvas" width="256" height="256" style="border:1px solid gray;"></canvas>
+</div>
+
+<div style="margin-top:0.5rem;">
+    <label>
+        Colormap
+        <select @bind="colormap" @bind:after="RunAsync">
+            @foreach (var option in Colormaps)
+            {
+                <option value="@option">@option</option>
+            }
+        </select>
+    </label>
+</div>
+
+<div style="margin-top:0.5rem;">
+    <PhotoPicker OnFileSelected="OnPhotoSelectedAsync" OnReset="ResetToDefaultAsync" />
+</div>
+<p><em>@photoStatus</em></p>
+
+@code {
+    private const int CanvasSize = 256;
+
+    private static readonly ColormapTypes[] Colormaps =
+    {
+        ColormapTypes.Jet,
+        ColormapTypes.Hot,
+        ColormapTypes.Cool,
+        ColormapTypes.Rainbow,
+        ColormapTypes.Ocean,
+        ColormapTypes.Spring,
+        ColormapTypes.Summer,
+        ColormapTypes.Autumn,
+        ColormapTypes.Winter,
+        ColormapTypes.Bone,
+        ColormapTypes.Hsv,
+        ColormapTypes.Pink,
+        ColormapTypes.Parula,
+        ColormapTypes.Magma,
+        ColormapTypes.Inferno,
+        ColormapTypes.Plasma,
+        ColormapTypes.Viridis,
+        ColormapTypes.Turbo,
+    };
+
+    private Mat? srcMat;
+    private byte[]? defaultBytes;
+    private ElementReference srcCanvas;
+    private ElementReference dstCanvas;
+    private CanvasClient? srcCanvasClient;
+    private CanvasClient? dstCanvasClient;
+    private ColormapTypes colormap = ColormapTypes.Jet;
+    private string photoStatus = "";
+
+    public void Dispose() => srcMat?.Dispose();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        defaultBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
+        srcMat = Mat.FromImageData(defaultBytes);
+
+        srcCanvasClient ??= new CanvasClient(jsRuntime, srcCanvas);
+        dstCanvasClient ??= new CanvasClient(jsRuntime, dstCanvas);
+
+        await srcCanvasClient.DrawMatAsync(srcMat);
+        await RunAsync();
+    }
+
+    private async Task OnPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            var newMat = await ImageLoader.LoadFromFileAsync(jsRuntime, file, CanvasSize);
+            srcMat?.Dispose();
+            srcMat = newMat;
+            photoStatus = "";
+        }
+        catch (Exception ex)
+        {
+            photoStatus = $"Couldn't load that image: {ex.Message}";
+            return;
+        }
+
+        await srcCanvasClient!.DrawMatAsync(srcMat);
+        await RunAsync();
+    }
+
+    private async Task ResetToDefaultAsync()
+    {
+        if (defaultBytes is null)
+            return;
+
+        srcMat?.Dispose();
+        srcMat = Mat.FromImageData(defaultBytes);
+        photoStatus = "";
+
+        await srcCanvasClient!.DrawMatAsync(srcMat);
+        await RunAsync();
+    }
+
+    private async Task RunAsync()
+    {
+        if (srcMat is null || dstCanvasClient is null)
+            return;
+
+        using var grayMat = new Mat();
+        using var dstMat = new Mat();
+        Cv2.CvtColor(srcMat, grayMat, ColorConversionCodes.BGR2GRAY);
+        Cv2.ApplyColorMap(grayMat, dstMat, colormap);
+
+        await dstCanvasClient.DrawMatAsync(dstMat);
+    }
+}

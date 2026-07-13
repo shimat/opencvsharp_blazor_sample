@@ -1,0 +1,134 @@
+@page "/samples/shape-analysis"
+@using OpenCvSharp
+@inject IJSRuntime jsRuntime
+@implements IDisposable
+
+<PageTitle>Shape Analysis</PageTitle>
+
+<h1>Shape Analysis</h1>
+
+<p>
+    Draw any closed-ish shape, then see four different geometric descriptions OpenCV can pull out
+    of it at once: the convex hull, the minimum-area rotated rectangle, the axis-aligned bounding
+    box, and a simplified polygon approximation - each answers a different "what shape is this"
+    question a plain canvas has no way to compute.
+</p>
+
+<div style="display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap;">
+    <div style="width:256px; height:256px;"
+         @onmousedown="OnMouseDown" @onmousemove="OnMouseMove" @onmouseup="OnMouseUp" @onmouseleave="OnMouseUp">
+        <canvas @ref="drawCanvas" width="256" height="256" style="border:1px solid gray; cursor:crosshair;"></canvas>
+    </div>
+    <canvas @ref="resultCanvas" width="256" height="256" style="border:1px solid gray;"></canvas>
+</div>
+
+<div>
+    <button @onclick="ClearAsync">Clear</button>
+    <button @onclick="AnalyzeAsync">Analyze</button>
+</div>
+<p><em>@status</em></p>
+<ul style="font-size:0.85rem; list-style:none; padding-left:0;">
+    <li><span style="color:lime;">■</span> Convex hull</li>
+    <li><span style="color:#ff9933;">■</span> Minimum-area rotated rect</li>
+    <li><span style="color:red;">■</span> Axis-aligned bounding box</li>
+    <li><span style="color:yellow;">■</span> Approximated polygon</li>
+</ul>
+
+@code {
+    private const int CanvasSize = 256;
+
+    private readonly Mat drawingMat = new(new Size(CanvasSize, CanvasSize), MatType.CV_8UC1, Scalar.Black);
+    private ElementReference drawCanvas;
+    private ElementReference resultCanvas;
+    private CanvasClient? drawCanvasClient;
+    private CanvasClient? resultCanvasClient;
+
+    private bool isDrawing;
+    private Point lastPoint;
+    private string status = "Draw a shape, then analyze it.";
+
+    public void Dispose() => drawingMat.Dispose();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        drawCanvasClient ??= new CanvasClient(jsRuntime, drawCanvas);
+        resultCanvasClient ??= new CanvasClient(jsRuntime, resultCanvas);
+        await drawCanvasClient.DrawMatAsync(drawingMat);
+        await ClearResultAsync();
+    }
+
+    private void OnMouseDown(MouseEventArgs e)
+    {
+        isDrawing = true;
+        lastPoint = new Point((int)e.OffsetX, (int)e.OffsetY);
+    }
+
+    private async Task OnMouseMove(MouseEventArgs e)
+    {
+        if (!isDrawing)
+            return;
+
+        var point = new Point((int)e.OffsetX, (int)e.OffsetY);
+        Cv2.Line(drawingMat, lastPoint, point, Scalar.White, thickness: 6);
+        lastPoint = point;
+        await drawCanvasClient!.DrawMatAsync(drawingMat);
+    }
+
+    private void OnMouseUp(MouseEventArgs e) => isDrawing = false;
+
+    private async Task ClearAsync()
+    {
+        drawingMat.SetTo(Scalar.Black);
+        status = "Draw a shape, then analyze it.";
+        await drawCanvasClient!.DrawMatAsync(drawingMat);
+        await ClearResultAsync();
+    }
+
+    private async Task ClearResultAsync()
+    {
+        using var blank = new Mat(new Size(CanvasSize, CanvasSize), MatType.CV_8UC3, Scalar.All(20));
+        await resultCanvasClient!.DrawMatAsync(blank);
+    }
+
+    private async Task AnalyzeAsync()
+    {
+        Cv2.FindContours(drawingMat, out var contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+        if (contours.Length == 0)
+        {
+            status = "Nothing to analyze - draw a shape first.";
+            return;
+        }
+
+        var largest = contours.OrderByDescending(c => Cv2.ContourArea(c)).First();
+        if (Cv2.ContourArea(largest) < 50)
+        {
+            status = "That shape is too small - draw a bigger one.";
+            return;
+        }
+
+        using var result = new Mat();
+        Cv2.CvtColor(drawingMat, result, ColorConversionCodes.GRAY2BGR);
+
+        var hull = Cv2.ConvexHull(largest, clockwise: true);
+        Cv2.Polylines(result, new[] { hull }, isClosed: true, Scalar.LimeGreen, thickness: 2);
+
+        var minRect = Cv2.MinAreaRect(largest);
+        var boxPoints = Array.ConvertAll(minRect.Points(), p => (Point)p);
+        Cv2.Polylines(result, new[] { boxPoints }, isClosed: true, new Scalar(51, 153, 255), thickness: 2);
+
+        var boundingRect = Cv2.BoundingRect(largest);
+        Cv2.Rectangle(result, boundingRect, Scalar.Red, thickness: 2);
+
+        var perimeter = Cv2.ArcLength(largest, true);
+        var approx = Cv2.ApproxPolyDP(largest, 0.02 * perimeter, true);
+        Cv2.Polylines(result, new[] { approx }, isClosed: true, Scalar.Yellow, thickness: 2);
+
+        await resultCanvasClient!.DrawMatAsync(result);
+        status = $"Analyzed - the approximated polygon has {approx.Length} vertices.";
+    }
+}

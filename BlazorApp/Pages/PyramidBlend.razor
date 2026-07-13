@@ -1,0 +1,271 @@
+@page "/samples/pyramid-blend"
+@using OpenCvSharp
+@inject IJSRuntime jsRuntime
+@inject HttpClient httpClient
+@implements IDisposable
+
+<PageTitle>Pyramid Blend</PageTitle>
+
+<h1>Laplacian Pyramid Blend</h1>
+
+<p>
+    A hard cut between two photos leaves an obvious seam. Splitting each image into a
+    <a href="https://en.wikipedia.org/wiki/Pyramid_(image_processing)" target="_blank">Laplacian pyramid</a>,
+    blending each frequency band separately with a blurred mask, then reconstructing, hides the
+    seam far better - low frequencies blend over a wide band, high frequencies over a narrow one.
+</p>
+
+<div style="display:flex; gap:1.5rem; flex-wrap:wrap;">
+    <div>
+        <p><strong>Left photo</strong></p>
+        <PhotoPicker OnFileSelected="OnLeftPhotoSelectedAsync" OnReset="ResetLeftAsync" />
+    </div>
+    <div>
+        <p><strong>Right photo</strong></p>
+        <PhotoPicker OnFileSelected="OnRightPhotoSelectedAsync" OnReset="ResetRightAsync" />
+    </div>
+</div>
+
+<div style="display:flex; gap:1rem; align-items:center; margin:0.5rem 0;">
+    <label>Seam position</label>
+    <input type="range" min="10" max="246" @bind="seamX" @bind:event="oninput" @bind:after="RunBlendAsync" style="width:200px;" />
+    <span>@seamX</span>
+</div>
+
+<div style="display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap;">
+    <div>
+        <canvas @ref="naiveCanvas" width="@CanvasSize" height="@CanvasSize" style="border:1px solid gray;"></canvas>
+        <p><small>Hard cut</small></p>
+    </div>
+    <div>
+        <canvas @ref="blendedCanvas" width="@CanvasSize" height="@CanvasSize" style="border:1px solid gray;"></canvas>
+        <p><small>Laplacian pyramid blend</small></p>
+    </div>
+</div>
+<p><em>@status</em></p>
+
+@code {
+    private const int CanvasSize = 256;
+    private const int Levels = 4;
+
+    private Mat? leftMat;
+    private Mat? rightMat;
+    private byte[]? defaultLeftBytes;
+    private ElementReference naiveCanvas;
+    private ElementReference blendedCanvas;
+    private CanvasClient? naiveCanvasClient;
+    private CanvasClient? blendedCanvasClient;
+    private int seamX = 128;
+    private string status = "";
+
+    public void Dispose()
+    {
+        leftMat?.Dispose();
+        rightMat?.Dispose();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        naiveCanvasClient ??= new CanvasClient(jsRuntime, naiveCanvas);
+        blendedCanvasClient ??= new CanvasClient(jsRuntime, blendedCanvas);
+
+        defaultLeftBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
+        leftMat = Mat.FromImageData(defaultLeftBytes);
+        rightMat = GenerateInvertedDefault(leftMat);
+
+        await RunBlendAsync();
+    }
+
+    // The default "right" photo, so the sample works before any upload - a color-inverted copy
+    // of the same photo, giving two visually distinct but same-sized images to blend.
+    private static Mat GenerateInvertedDefault(Mat source)
+    {
+        var inverted = new Mat();
+        Cv2.BitwiseNot(source, inverted);
+        return inverted;
+    }
+
+    private async Task OnLeftPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            var newMat = await ImageLoader.LoadFromFileAsync(jsRuntime, file, CanvasSize);
+            leftMat?.Dispose();
+            leftMat = newMat;
+            status = "";
+            await RunBlendAsync();
+        }
+        catch (Exception ex)
+        {
+            status = $"Couldn't load that image: {ex.Message}";
+        }
+    }
+
+    private async Task OnRightPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            var newMat = await ImageLoader.LoadFromFileAsync(jsRuntime, file, CanvasSize);
+            rightMat?.Dispose();
+            rightMat = newMat;
+            status = "";
+            await RunBlendAsync();
+        }
+        catch (Exception ex)
+        {
+            status = $"Couldn't load that image: {ex.Message}";
+        }
+    }
+
+    private async Task ResetLeftAsync()
+    {
+        if (defaultLeftBytes is null)
+            return;
+
+        leftMat?.Dispose();
+        leftMat = Mat.FromImageData(defaultLeftBytes);
+        await RunBlendAsync();
+    }
+
+    private async Task ResetRightAsync()
+    {
+        if (leftMat is null)
+            return;
+
+        rightMat?.Dispose();
+        rightMat = GenerateInvertedDefault(leftMat);
+        await RunBlendAsync();
+    }
+
+    private async Task RunBlendAsync()
+    {
+        if (leftMat is null || rightMat is null || naiveCanvasClient is null || blendedCanvasClient is null)
+            return;
+
+        using var naive = new Mat();
+        leftMat.CopyTo(naive);
+        using (var rightRoi = new Mat(rightMat, new Rect(seamX, 0, CanvasSize - seamX, CanvasSize)))
+        using (var naiveRoi = new Mat(naive, new Rect(seamX, 0, CanvasSize - seamX, CanvasSize)))
+        {
+            rightRoi.CopyTo(naiveRoi);
+        }
+        await naiveCanvasClient.DrawMatAsync(naive);
+
+        using var blended = BlendPyramids(leftMat, rightMat, seamX);
+        await blendedCanvasClient.DrawMatAsync(blended);
+        status = "Right result blends low frequencies over a wide band and high frequencies over a narrow one.";
+    }
+
+    private static Mat BlendPyramids(Mat left, Mat right, int seamX)
+    {
+        using var maskFull = new Mat(left.Size(), MatType.CV_32FC1, Scalar.All(0));
+        Cv2.Rectangle(maskFull, new Rect(0, 0, seamX, left.Rows), Scalar.All(1), thickness: -1);
+
+        var gLeft = BuildGaussianPyramidFloat(left, Levels);
+        var gRight = BuildGaussianPyramidFloat(right, Levels);
+        var gMask = BuildGaussianPyramidSingleChannel(maskFull, Levels);
+
+        var lLeft = BuildLaplacianPyramid(gLeft);
+        var lRight = BuildLaplacianPyramid(gRight);
+
+        var result = lLeft[Levels].Clone();
+        BlendLevelInPlace(result, lRight[Levels], gMask[Levels]);
+
+        for (var level = Levels - 1; level >= 0; level--)
+        {
+            using var blendedLevel = lLeft[level].Clone();
+            BlendLevelInPlace(blendedLevel, lRight[level], gMask[level]);
+
+            using var upsized = new Mat();
+            Cv2.PyrUp(result, upsized, blendedLevel.Size());
+            result.Dispose();
+
+            result = new Mat();
+            Cv2.Add(upsized, blendedLevel, result);
+        }
+
+        using var final8u = new Mat();
+        result.ConvertTo(final8u, MatType.CV_8UC3);
+        result.Dispose();
+
+        DisposeAll(gLeft);
+        DisposeAll(gRight);
+        DisposeAll(gMask);
+        DisposeAll(lLeft);
+        DisposeAll(lRight);
+
+        return final8u.Clone();
+    }
+
+    // result := result * mask + other * (1 - mask), all in CV_32FC3 (mask is single-channel).
+    private static void BlendLevelInPlace(Mat result, Mat other, Mat maskSingleChannel)
+    {
+        using var mask3 = new Mat();
+        Cv2.CvtColor(maskSingleChannel, mask3, ColorConversionCodes.GRAY2BGR);
+        using var invMask3 = new Mat();
+        Cv2.Subtract(Scalar.All(1.0), mask3, invMask3);
+
+        using var partA = new Mat();
+        Cv2.Multiply(result, mask3, partA);
+        using var partB = new Mat();
+        Cv2.Multiply(other, invMask3, partB);
+        Cv2.Add(partA, partB, result);
+    }
+
+    private static Mat[] BuildGaussianPyramidFloat(Mat img8u, int levels)
+    {
+        using var imgFloat = new Mat();
+        img8u.ConvertTo(imgFloat, MatType.CV_32FC3);
+
+        var pyramid = new Mat[levels + 1];
+        pyramid[0] = imgFloat.Clone();
+        for (var i = 1; i <= levels; i++)
+        {
+            var down = new Mat();
+            Cv2.PyrDown(pyramid[i - 1], down);
+            pyramid[i] = down;
+        }
+        return pyramid;
+    }
+
+    private static Mat[] BuildGaussianPyramidSingleChannel(Mat img, int levels)
+    {
+        var pyramid = new Mat[levels + 1];
+        pyramid[0] = img.Clone();
+        for (var i = 1; i <= levels; i++)
+        {
+            var down = new Mat();
+            Cv2.PyrDown(pyramid[i - 1], down);
+            pyramid[i] = down;
+        }
+        return pyramid;
+    }
+
+    private static Mat[] BuildLaplacianPyramid(Mat[] gaussian)
+    {
+        var levels = gaussian.Length - 1;
+        var laplacian = new Mat[levels + 1];
+        laplacian[levels] = gaussian[levels].Clone();
+
+        for (var i = levels - 1; i >= 0; i--)
+        {
+            using var upsized = new Mat();
+            Cv2.PyrUp(gaussian[i + 1], upsized, gaussian[i].Size());
+            var lap = new Mat();
+            Cv2.Subtract(gaussian[i], upsized, lap);
+            laplacian[i] = lap;
+        }
+        return laplacian;
+    }
+
+    private static void DisposeAll(Mat[] mats)
+    {
+        foreach (var m in mats)
+            m.Dispose();
+    }
+}

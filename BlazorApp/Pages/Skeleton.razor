@@ -1,0 +1,115 @@
+@page "/samples/skeleton"
+@using OpenCvSharp
+@using OpenCvSharp.XImgProc
+@inject IJSRuntime jsRuntime
+@implements IDisposable
+
+<PageTitle>Skeleton (Thinning)</PageTitle>
+
+<h1>Skeleton (Thinning)</h1>
+
+<p>
+    Paint a filled blob, then <code>Cv2.XImgProc.Thinning</code> erodes it down to a 1-pixel-wide
+    centerline that still preserves its overall topology - the shape's "skeleton".
+</p>
+
+<div style="display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap;">
+    <div style="position:relative; width:256px; height:256px;"
+         @onmousedown="OnMouseDown" @onmousemove="OnMouseMove" @onmouseup="OnMouseUp" @onmouseleave="OnMouseUp">
+        <canvas @ref="drawCanvas" width="256" height="256" style="position:absolute; left:0; top:0; border:1px solid gray; cursor:crosshair;"></canvas>
+    </div>
+    <canvas @ref="skeletonCanvas" width="256" height="256" style="border:1px solid gray;"></canvas>
+</div>
+
+<div>
+    <button @onclick="ClearAsync">Clear</button>
+    <button @onclick="SkeletonizeAsync">Skeletonize</button>
+</div>
+<p><em>@status</em></p>
+
+@code {
+    private const int CanvasSize = 256;
+
+    private readonly Mat drawingMat = new(new Size(CanvasSize, CanvasSize), MatType.CV_8UC1, Scalar.Black);
+    private ElementReference drawCanvas;
+    private ElementReference skeletonCanvas;
+    private CanvasClient? drawCanvasClient;
+    private CanvasClient? skeletonCanvasClient;
+
+    private bool isDrawing;
+    private Point lastPoint;
+    private string status = "Paint a filled blob, then extract its skeleton.";
+
+    public void Dispose() => drawingMat.Dispose();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        drawCanvasClient ??= new CanvasClient(jsRuntime, drawCanvas);
+        skeletonCanvasClient ??= new CanvasClient(jsRuntime, skeletonCanvas);
+        await drawCanvasClient.DrawMatAsync(drawingMat);
+        await ClearCanvasAsync(skeletonCanvasClient);
+    }
+
+    private async Task OnMouseDown(MouseEventArgs e)
+    {
+        isDrawing = true;
+        lastPoint = new Point((int)e.OffsetX, (int)e.OffsetY);
+
+        // A plain click with no drag wouldn't otherwise leave any mark, since only OnMouseMove
+        // draws - paint a dot immediately so a single click is visibly a brush stroke too.
+        Cv2.Circle(drawingMat, lastPoint, 9, Scalar.White, thickness: -1);
+        await drawCanvasClient!.DrawMatAsync(drawingMat);
+    }
+
+    private async Task OnMouseMove(MouseEventArgs e)
+    {
+        if (!isDrawing)
+            return;
+
+        var point = new Point((int)e.OffsetX, (int)e.OffsetY);
+        Cv2.Line(drawingMat, lastPoint, point, Scalar.White, thickness: 18);
+        lastPoint = point;
+        await drawCanvasClient!.DrawMatAsync(drawingMat);
+    }
+
+    private void OnMouseUp(MouseEventArgs e) => isDrawing = false;
+
+    private async Task ClearAsync()
+    {
+        drawingMat.SetTo(Scalar.Black);
+        status = "Paint a filled blob, then extract its skeleton.";
+        await drawCanvasClient!.DrawMatAsync(drawingMat);
+        await ClearCanvasAsync(skeletonCanvasClient!);
+    }
+
+    private static async Task ClearCanvasAsync(CanvasClient client)
+    {
+        using var blank = new Mat(new Size(CanvasSize, CanvasSize), MatType.CV_8UC3, Scalar.All(20));
+        await client.DrawMatAsync(blank);
+    }
+
+    private async Task SkeletonizeAsync()
+    {
+        using var skeleton = new Mat();
+        Cv2.XImgProc.Thinning(drawingMat, skeleton, ThinningTypes.ZHANGSUEN);
+
+        // The skeleton is genuinely 1 pixel wide, which all but disappears against a white blob
+        // regardless of color - dilate it a couple of pixels purely for on-screen visibility, and
+        // pick red (not yellow) since yellow has almost no contrast against a white fill.
+        using var thickSkeleton = new Mat();
+        using var kernel = new Mat();
+        Cv2.Dilate(skeleton, thickSkeleton, kernel, iterations: 2);
+
+        using var colorResult = new Mat();
+        Cv2.CvtColor(drawingMat, colorResult, ColorConversionCodes.GRAY2BGR);
+        colorResult.SetTo(Scalar.Red, thickSkeleton);
+
+        await skeletonCanvasClient!.DrawMatAsync(colorResult);
+        status = "Skeleton extracted - red marks the (thickened for visibility) centerline.";
+    }
+}

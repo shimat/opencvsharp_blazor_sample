@@ -1,0 +1,293 @@
+@page "/samples/watershed-hough"
+@using OpenCvSharp
+@inject IJSRuntime jsRuntime
+@inject HttpClient httpClient
+@implements IDisposable
+
+<PageTitle>Watershed &amp; Hough Transform</PageTitle>
+
+<h1>Watershed &amp; Hough Transform</h1>
+
+<h2>Hough line &amp; circle detection</h2>
+<p>
+    <code>HoughLinesP</code> and <code>HoughCircles</code> find the analytic line segments and
+    circles hiding in an edge map - not just "where is there an edge" but "what shape is it".
+    Drag the sliders to see how each parameter changes what gets detected, live.
+</p>
+
+<div>
+    <canvas @ref="houghCanvas" width="256" height="256" style="border:1px solid gray;"></canvas>
+</div>
+
+<div style="display:grid; grid-template-columns:auto 1fr auto; gap:0.4rem 0.75rem; max-width:420px; align-items:center;">
+    <label>Canny threshold 1</label>
+    <input type="range" min="10" max="200" @bind="cannyThreshold1" @bind:event="oninput" @bind:after="RunHoughDetectionAsync" />
+    <span>@cannyThreshold1</span>
+
+    <label>Canny threshold 2</label>
+    <input type="range" min="10" max="255" @bind="cannyThreshold2" @bind:event="oninput" @bind:after="RunHoughDetectionAsync" />
+    <span>@cannyThreshold2</span>
+
+    <label>Line vote threshold</label>
+    <input type="range" min="10" max="150" @bind="houghLineThreshold" @bind:event="oninput" @bind:after="RunHoughDetectionAsync" />
+    <span>@houghLineThreshold</span>
+
+    <label>Min line length</label>
+    <input type="range" min="5" max="150" @bind="minLineLength" @bind:event="oninput" @bind:after="RunHoughDetectionAsync" />
+    <span>@minLineLength</span>
+
+    <label>Max line gap</label>
+    <input type="range" min="0" max="50" @bind="maxLineGap" @bind:event="oninput" @bind:after="RunHoughDetectionAsync" />
+    <span>@maxLineGap</span>
+
+    <label>Circle vote threshold</label>
+    <input type="range" min="10" max="80" @bind="houghCircleParam2" @bind:event="oninput" @bind:after="RunHoughDetectionAsync" />
+    <span>@houghCircleParam2</span>
+</div>
+
+<hr />
+
+<h2>Interactive Watershed segmentation</h2>
+<p>
+    Paint a few strokes marking what's foreground and what's background, then run
+    <code>Cv2.Watershed</code> - it floods outward from those seed markers along intensity
+    gradients until the regions meet, tracing a segmentation boundary a flat color-threshold can't.
+</p>
+
+<div style="display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap;">
+    <div style="position:relative; width:256px; height:256px;"
+         @onmousedown="OnMarkerMouseDown" @onmousemove="OnMarkerMouseMove" @onmouseup="OnMarkerMouseUp" @onmouseleave="OnMarkerMouseUp">
+        <canvas @ref="mandrillCanvas" width="256" height="256" style="position:absolute; left:0; top:0; border:1px solid gray;"></canvas>
+        <svg style="position:absolute; left:0; top:0; pointer-events:none;" width="256" height="256">
+            @foreach (var p in fgMarkerPoints)
+            {
+                <circle cx="@p.X" cy="@p.Y" r="3" fill="rgba(0,255,0,0.7)" />
+            }
+            @foreach (var p in bgMarkerPoints)
+            {
+                <circle cx="@p.X" cy="@p.Y" r="3" fill="rgba(255,0,0,0.7)" />
+            }
+        </svg>
+    </div>
+    <canvas @ref="watershedResultCanvas" width="256" height="256" style="border:1px solid gray;"></canvas>
+</div>
+
+<div>
+    <button @onclick="() => markingBackground = false" disabled="@(!markingBackground)">Mark foreground</button>
+    <button @onclick="() => markingBackground = true" disabled="@markingBackground">Mark background</button>
+    <button @onclick="ClearMarkers">Clear markers</button>
+    <button @onclick="RunWatershedAsync">Segment</button>
+</div>
+<div style="margin-top:0.5rem;">
+    <PhotoPicker OnFileSelected="OnPhotoSelectedAsync" OnReset="ResetToDefaultAsync" />
+</div>
+<p><em>@watershedStatus</em></p>
+
+@code {
+    // --- Hough section ---
+    private Mat? shapesMat;
+    private ElementReference houghCanvas;
+    private CanvasClient? houghCanvasClient;
+
+    private int cannyThreshold1 = 50;
+    private int cannyThreshold2 = 150;
+    private int houghLineThreshold = 40;
+    private int minLineLength = 40;
+    private int maxLineGap = 10;
+    private int houghCircleParam2 = 30;
+
+    // --- Watershed section ---
+    private const int MandrillCanvasSize = 256;
+
+    private Mat? mandrillMat;
+    private byte[]? defaultMandrillBytes;
+    private ElementReference mandrillCanvas;
+    private ElementReference watershedResultCanvas;
+    private CanvasClient? mandrillCanvasClient;
+    private CanvasClient? watershedResultCanvasClient;
+
+    private readonly List<Point> fgMarkerPoints = new();
+    private readonly List<Point> bgMarkerPoints = new();
+    private bool markingBackground;
+    private bool isMarking;
+    private string watershedStatus = "Paint some foreground (green) and background (red) markers, then segment.";
+
+    public void Dispose()
+    {
+        shapesMat?.Dispose();
+        mandrillMat?.Dispose();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        shapesMat = GenerateShapesImage();
+        houghCanvasClient ??= new CanvasClient(jsRuntime, houghCanvas);
+        await RunHoughDetectionAsync();
+
+        defaultMandrillBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
+        mandrillMat ??= Mat.FromImageData(defaultMandrillBytes);
+        mandrillCanvasClient ??= new CanvasClient(jsRuntime, mandrillCanvas);
+        watershedResultCanvasClient ??= new CanvasClient(jsRuntime, watershedResultCanvas);
+        await mandrillCanvasClient.DrawMatAsync(mandrillMat);
+        await ClearWatershedResultAsync();
+    }
+
+    private async Task OnPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            var newMat = await ImageLoader.LoadFromFileAsync(jsRuntime, file, MandrillCanvasSize);
+            mandrillMat?.Dispose();
+            mandrillMat = newMat;
+            watershedStatus = "Paint some foreground (green) and background (red) markers, then segment.";
+        }
+        catch (Exception ex)
+        {
+            watershedStatus = $"Couldn't load that image: {ex.Message}";
+            return;
+        }
+
+        fgMarkerPoints.Clear();
+        bgMarkerPoints.Clear();
+        await mandrillCanvasClient!.DrawMatAsync(mandrillMat);
+        await ClearWatershedResultAsync();
+    }
+
+    private async Task ResetToDefaultAsync()
+    {
+        if (defaultMandrillBytes is null)
+            return;
+
+        mandrillMat?.Dispose();
+        mandrillMat = Mat.FromImageData(defaultMandrillBytes);
+        fgMarkerPoints.Clear();
+        bgMarkerPoints.Clear();
+        watershedStatus = "Paint some foreground (green) and background (red) markers, then segment.";
+
+        await mandrillCanvasClient!.DrawMatAsync(mandrillMat);
+        await ClearWatershedResultAsync();
+    }
+
+    private async Task ClearWatershedResultAsync()
+    {
+        using var blank = new Mat(new Size(MandrillCanvasSize, MandrillCanvasSize), MatType.CV_8UC3, Scalar.All(220));
+        await watershedResultCanvasClient!.DrawMatAsync(blank);
+    }
+
+    private async Task RunHoughDetectionAsync()
+    {
+        if (shapesMat is null || houghCanvasClient is null)
+            return;
+
+        using var gray = new Mat();
+        Cv2.CvtColor(shapesMat, gray, ColorConversionCodes.BGR2GRAY);
+        using var edges = new Mat();
+        Cv2.Canny(gray, edges, cannyThreshold1, cannyThreshold2);
+
+        using var result = new Mat();
+        shapesMat.CopyTo(result);
+
+        var lines = Cv2.HoughLinesP(edges, 1, Math.PI / 180, houghLineThreshold, minLineLength, maxLineGap);
+        foreach (var line in lines)
+        {
+            Cv2.Line(result, line.P1, line.P2, Scalar.LimeGreen, 2);
+        }
+
+        var circles = Cv2.HoughCircles(gray, HoughModes.Gradient, dp: 1, minDist: 30, param1: 100, param2: houghCircleParam2, minRadius: 10, maxRadius: 60);
+        foreach (var circle in circles)
+        {
+            Cv2.Circle(result, (Point)circle.Center, (int)circle.Radius, Scalar.Red, 2);
+        }
+
+        await houghCanvasClient.DrawMatAsync(result);
+    }
+
+    private void OnMarkerMouseDown(MouseEventArgs e)
+    {
+        isMarking = true;
+        AddMarkerPoint(e);
+    }
+
+    private void OnMarkerMouseMove(MouseEventArgs e)
+    {
+        if (isMarking)
+            AddMarkerPoint(e);
+    }
+
+    private void OnMarkerMouseUp(MouseEventArgs e) => isMarking = false;
+
+    private void AddMarkerPoint(MouseEventArgs e)
+    {
+        var point = new Point((int)e.OffsetX, (int)e.OffsetY);
+        (markingBackground ? bgMarkerPoints : fgMarkerPoints).Add(point);
+    }
+
+    private void ClearMarkers()
+    {
+        fgMarkerPoints.Clear();
+        bgMarkerPoints.Clear();
+        watershedStatus = "Markers cleared - paint again.";
+    }
+
+    private async Task RunWatershedAsync()
+    {
+        if (mandrillMat is null || watershedResultCanvasClient is null)
+            return;
+
+        if (fgMarkerPoints.Count == 0 || bgMarkerPoints.Count == 0)
+        {
+            watershedStatus = "Mark at least one foreground area and one background area first.";
+            return;
+        }
+
+        watershedStatus = "Segmenting...";
+        StateHasChanged();
+        await Task.Yield();
+
+        using var markers = new Mat(mandrillMat.Size(), MatType.CV_32SC1, Scalar.All(0));
+        foreach (var p in fgMarkerPoints)
+            Cv2.Circle(markers, p, 4, Scalar.All(1), thickness: -1);
+        foreach (var p in bgMarkerPoints)
+            Cv2.Circle(markers, p, 4, Scalar.All(2), thickness: -1);
+
+        using var watershedInput = new Mat();
+        mandrillMat.CopyTo(watershedInput);
+        Cv2.Watershed(watershedInput, markers);
+
+        using var fgRegionMask = new Mat();
+        Cv2.Compare(markers, new Scalar(1), fgRegionMask, CmpTypes.EQ);
+        using var boundaryMask = new Mat();
+        Cv2.Compare(markers, new Scalar(-1), boundaryMask, CmpTypes.EQ);
+
+        using var result = new Mat();
+        mandrillMat.CopyTo(result);
+
+        using var green = new Mat(result.Size(), result.Type(), new Scalar(0, 180, 0));
+        using var tinted = new Mat();
+        Cv2.AddWeighted(result, 0.6, green, 0.4, 0, tinted);
+        tinted.CopyTo(result, fgRegionMask);
+        result.SetTo(Scalar.Yellow, boundaryMask);
+
+        await watershedResultCanvasClient.DrawMatAsync(result);
+        watershedStatus = "Done - green marks the detected region, yellow the watershed boundary.";
+    }
+
+    // Builds a synthetic image containing a handful of straight lines and circles so Hough
+    // detection has clean, deterministic shapes to find.
+    private static Mat GenerateShapesImage()
+    {
+        var mat = new Mat(new Size(256, 256), MatType.CV_8UC3, Scalar.Black);
+        Cv2.Line(mat, new Point(30, 40), new Point(220, 60), Scalar.White, 3);
+        Cv2.Line(mat, new Point(20, 210), new Point(210, 230), Scalar.White, 3);
+        Cv2.Line(mat, new Point(35, 100), new Point(35, 190), Scalar.White, 3);
+        Cv2.Circle(mat, new Point(80, 100), 30, Scalar.White, 3);
+        Cv2.Circle(mat, new Point(180, 160), 45, Scalar.White, 3);
+        Cv2.Circle(mat, new Point(190, 55), 18, Scalar.White, 3);
+        return mat;
+    }
+}
