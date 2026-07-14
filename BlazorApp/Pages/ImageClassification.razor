@@ -17,21 +17,39 @@
 <canvas @ref="srcCanvas" width="@CanvasSize" height="@CanvasSize" style="border:1px solid gray;"></canvas>
 
 <div style="margin-top:0.5rem;">
+    <label>
+        Sample:
+        <select @onchange="OnPresetChangedAsync">
+            @for (var i = 0; i < Presets.Length; i++)
+            {
+                var index = i;
+                <option value="@index" selected="@(index == selectedPreset)">@Presets[index].Label</option>
+            }
+        </select>
+    </label>
+</div>
+<div style="margin-top:0.5rem;">
     <PhotoPicker OnFileSelected="OnPhotoSelectedAsync" OnReset="ResetToDefaultAsync" />
 </div>
 <p><em>@status</em></p>
 
-<AttributionFooter Entries="@(new[] {
-    new AttributionFooter.AttributionEntry("MobileNetV2 model", "https://github.com/opencv/opencv_zoo/tree/main/models/image_classification_mobilenet", "Apache-2.0"),
-    new AttributionFooter.AttributionEntry("White cat photo", "https://commons.wikimedia.org/wiki/File:Green-eyed_white_cat_looking_at_camera.jpg", "CC0"),
-})" />
+<AttributionFooter Entries="@GetAttributionEntries()" />
 
 @code {
     private const int CanvasSize = 256;
     private const int ModelInputSize = 224;
 
+    private static readonly (string Label, string FileName, string Description, string SourceUrl, string License)[] Presets =
+    {
+        ("Cat", "WhiteCat.jpg", "White cat photo", "https://commons.wikimedia.org/wiki/File:Green-eyed_white_cat_looking_at_camera.jpg", "CC0"),
+        ("Dog", "GoldenRetriever.jpg", "Golden retriever photo", "https://commons.wikimedia.org/wiki/File:Golden_Retriever_Chewing_A_Stick.jpg", "CC0"),
+        ("Car", "SportsCar.jpg", "Sports car photo", "https://commons.wikimedia.org/wiki/File:Toyota_UP15_Sports_800_(23101512565).jpg", "CC0"),
+        ("Pizza", "Pizza.jpg", "Pizza photo", "https://commons.wikimedia.org/wiki/File:Pizza_with_mushrooms_and_cheese.jpg", "CC0"),
+    };
+
     private Mat? srcMat;
-    private byte[]? defaultBytes;
+    private int selectedPreset;
+    private bool isShowingUpload;
     private ElementReference srcCanvas;
     private CanvasClient? srcCanvasClient;
     private ClassificationModel? model;
@@ -42,6 +60,22 @@
     {
         srcMat?.Dispose();
         model?.Dispose();
+    }
+
+    private AttributionFooter.AttributionEntry[] GetAttributionEntries()
+    {
+        var entries = new List<AttributionFooter.AttributionEntry>
+        {
+            new("MobileNetV2 model", "https://github.com/opencv/opencv_zoo/tree/main/models/image_classification_mobilenet", "Apache-2.0"),
+        };
+
+        if (!isShowingUpload)
+        {
+            var preset = Presets[selectedPreset];
+            entries.Add(new AttributionFooter.AttributionEntry(preset.Description, preset.SourceUrl, preset.License));
+        }
+
+        return entries.ToArray();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -58,18 +92,25 @@
             status = "Loading model...";
             StateHasChanged();
             await EnsureModelLoadedAsync();
-
-            defaultBytes = await httpClient.GetByteArrayAsync("images/WhiteCat.jpg");
-            srcMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize);
-
-            status = "";
-            await ClassifyAsync();
+            await LoadPresetAsync(selectedPreset);
         }
         catch (Exception ex)
         {
             status = $"Initialization failed: {ex.Message}";
         }
         StateHasChanged();
+    }
+
+    private async Task LoadPresetAsync(int index)
+    {
+        var preset = Presets[index];
+        var bytes = await httpClient.GetByteArrayAsync($"images/{preset.FileName}");
+        var newMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, bytes, CanvasSize);
+        srcMat?.Dispose();
+        srcMat = newMat;
+        isShowingUpload = false;
+        status = "";
+        await ClassifyAsync();
     }
 
     private async Task EnsureModelLoadedAsync()
@@ -99,6 +140,20 @@
         model.SetEnableSoftmaxPostProcessing(true);
     }
 
+    private async Task OnPresetChangedAsync(ChangeEventArgs e)
+    {
+        selectedPreset = int.Parse((string)e.Value!);
+
+        try
+        {
+            await LoadPresetAsync(selectedPreset);
+        }
+        catch (Exception ex)
+        {
+            status = $"Couldn't load that image: {ex.Message}";
+        }
+    }
+
     private async Task OnPhotoSelectedAsync(IBrowserFile file)
     {
         try
@@ -107,6 +162,7 @@
             var newMat = uploaded.Clone();
             srcMat?.Dispose();
             srcMat = newMat;
+            isShowingUpload = true;
             status = "";
             await ClassifyAsync();
         }
@@ -118,16 +174,9 @@
 
     private async Task ResetToDefaultAsync()
     {
-        if (defaultBytes is null)
-            return;
-
         try
         {
-            var newMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize);
-            srcMat?.Dispose();
-            srcMat = newMat;
-            status = "";
-            await ClassifyAsync();
+            await LoadPresetAsync(selectedPreset);
         }
         catch (Exception ex)
         {
