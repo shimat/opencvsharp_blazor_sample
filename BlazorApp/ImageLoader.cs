@@ -20,11 +20,19 @@ namespace BlazorApp
             using var memoryStream = new MemoryStream();
             await stream.CopyToAsync(memoryStream);
 
+            return await LoadFromBytesAsync(jsRuntime, memoryStream.ToArray(), targetSize);
+        }
+
+        // Same decode/resize path as LoadFromFileAsync, for callers that already have the raw
+        // bytes in memory (e.g. a bundled default image fetched via HttpClient) rather than an
+        // IBrowserFile.
+        public static async Task<Mat> LoadFromBytesAsync(IJSRuntime jsRuntime, byte[] bytes, int targetSize)
+        {
             // Let the browser's own (fast, native) image pipeline decode and downscale the photo
-            // first - handing OpenCV a full-resolution phone photo directly would decode it on
-            // this interpreted wasm build's single UI thread, which can look like the whole app
-            // has frozen for a large image.
-            var resizedBytes = await jsRuntime.InvokeAsync<byte[]>("loadAndResizeImageBytes", memoryStream.ToArray(), targetSize);
+            // first - handing OpenCV a full-resolution photo directly would decode it on this
+            // interpreted wasm build's single UI thread, which can look like the whole app has
+            // frozen for a large image.
+            var resizedBytes = await jsRuntime.InvokeAsync<byte[]>("loadAndResizeImageBytes", bytes, targetSize);
 
             using var decoded = Mat.FromImageData(resizedBytes);
             if (decoded.Empty())

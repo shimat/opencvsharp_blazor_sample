@@ -1,0 +1,145 @@
+@page "/samples/super-resolution"
+@using OpenCvSharp
+@using OpenCvSharp.DnnSuperres
+@inject IJSRuntime jsRuntime
+@inject HttpClient httpClient
+@implements IDisposable
+
+<PageTitle>Super Resolution (ESPCN)</PageTitle>
+
+<h1>Super Resolution (ESPCN)</h1>
+
+<p>
+    Upscales a deliberately low-resolution photo 4x with ESPCN - a tiny convolutional neural
+    network - and compares it against a naive bicubic resize of the same low-res source, so the
+    difference is the network's contribution, not just having more pixels to start from.
+</p>
+
+<div style="display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap;">
+    <div>
+        <p>Low-res input (@(LowResSize)x@(LowResSize))</p>
+        <canvas @ref="lowResCanvas" width="@LowResSize" height="@LowResSize" style="border:1px solid gray; image-rendering:pixelated; width:@(HighResSize)px; height:@(HighResSize)px;"></canvas>
+    </div>
+    <div>
+        <p>Naive bicubic resize (@(HighResSize)x@(HighResSize))</p>
+        <canvas @ref="bicubicCanvas" width="@HighResSize" height="@HighResSize" style="border:1px solid gray;"></canvas>
+    </div>
+    <div>
+        <p>ESPCN super resolution (@(HighResSize)x@(HighResSize))</p>
+        <canvas @ref="espcnCanvas" width="@HighResSize" height="@HighResSize" style="border:1px solid gray;"></canvas>
+    </div>
+</div>
+
+<div style="margin-top:0.5rem;">
+    <PhotoPicker OnFileSelected="OnPhotoSelectedAsync" OnReset="ResetToDefaultAsync" />
+</div>
+<p><em>@status</em></p>
+
+@code {
+    private const int LowResSize = 96;
+    private const int Scale = 4;
+    private const int HighResSize = LowResSize * Scale;
+
+    private Mat? lowResMat;
+    private byte[]? defaultBytes;
+    private ElementReference lowResCanvas;
+    private ElementReference bicubicCanvas;
+    private ElementReference espcnCanvas;
+    private CanvasClient? lowResCanvasClient;
+    private CanvasClient? bicubicCanvasClient;
+    private CanvasClient? espcnCanvasClient;
+    private DnnSuperResImpl? superRes;
+    private string status = "";
+
+    public void Dispose()
+    {
+        lowResMat?.Dispose();
+        superRes?.Dispose();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        lowResCanvasClient ??= new CanvasClient(jsRuntime, lowResCanvas);
+        bicubicCanvasClient ??= new CanvasClient(jsRuntime, bicubicCanvas);
+        espcnCanvasClient ??= new CanvasClient(jsRuntime, espcnCanvas);
+
+        status = "Loading model...";
+        StateHasChanged();
+        await EnsureModelLoadedAsync();
+
+        defaultBytes = await httpClient.GetByteArrayAsync("images/ScarletIbis.jpg");
+        lowResMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, LowResSize);
+
+        status = "";
+        await RunAsync();
+        StateHasChanged();
+    }
+
+    private async Task EnsureModelLoadedAsync()
+    {
+        if (superRes is not null)
+            return;
+
+        var modelBytes = await httpClient.GetByteArrayAsync("models/ESPCN_x4.pb");
+        const string modelPath = "ESPCN_x4.pb";
+        await File.WriteAllBytesAsync(modelPath, modelBytes);
+
+        superRes = new DnnSuperResImpl();
+        superRes.ReadModel(modelPath);
+        superRes.SetModel("espcn", Scale);
+    }
+
+    private async Task OnPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            // Deliberately downscale to a small square regardless of the uploaded photo's own
+            // resolution - upsampling an already-high-res photo wouldn't show anything
+            // meaningful.
+            using var uploaded = await ImageLoader.LoadFromFileAsync(jsRuntime, file, LowResSize);
+            lowResMat?.Dispose();
+            lowResMat = uploaded.Clone();
+            status = "";
+        }
+        catch (Exception ex)
+        {
+            status = $"Couldn't load that image: {ex.Message}";
+            return;
+        }
+
+        await RunAsync();
+    }
+
+    private async Task ResetToDefaultAsync()
+    {
+        if (defaultBytes is null)
+            return;
+
+        lowResMat?.Dispose();
+        lowResMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, LowResSize);
+
+        status = "";
+        await RunAsync();
+    }
+
+    private async Task RunAsync()
+    {
+        if (lowResMat is null || superRes is null)
+            return;
+
+        await lowResCanvasClient!.DrawMatAsync(lowResMat);
+
+        using var bicubic = new Mat();
+        Cv2.Resize(lowResMat, bicubic, new Size(HighResSize, HighResSize), interpolation: InterpolationFlags.Cubic);
+        await bicubicCanvasClient!.DrawMatAsync(bicubic);
+
+        using var upsampled = new Mat();
+        superRes.Upsample(lowResMat, upsampled);
+        await espcnCanvasClient!.DrawMatAsync(upsampled);
+    }
+}
