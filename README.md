@@ -38,6 +38,10 @@ Most photo-based samples default to a bundled test image, but accept any uploade
 - .NET 10 / Blazor WebAssembly
 - [OpenCvSharp5](https://www.nuget.org/packages/OpenCvSharp5) + [OpenCvSharp5.runtime.wasm](https://www.nuget.org/packages/OpenCvSharp5.runtime.wasm)
 
+## Assets
+
+Bundled test images and DNN models are third-party assets, not original work — see [`BlazorApp/wwwroot/images/README.md`](BlazorApp/wwwroot/images/README.md) and [`BlazorApp/wwwroot/models/README.md`](BlazorApp/wwwroot/models/README.md) for sources and licenses.
+
 ## Running locally
 
 Requires the .NET 10 SDK and the `wasm-tools` workload:
