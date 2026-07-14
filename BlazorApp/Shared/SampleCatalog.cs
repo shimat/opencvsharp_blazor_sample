@@ -67,13 +67,6 @@ namespace BlazorApp.Shared
                 "Real-time face detection against a live webcam feed using a Haar cascade classifier.",
                 new[] { "Realtime", "Webcam" }),
             new SampleInfo(
-                "samples/dnn-detection",
-                "DNN Face Detection (YuNet)",
-                "Object Detection",
-                "neural-net",
-                "Real-time face detection and landmark localization against a live webcam feed using the YuNet ONNX model via Cv2.Dnn.",
-                new[] { "Realtime", "Webcam" }),
-            new SampleInfo(
                 "samples/aruco",
                 "ArUco Marker Detection",
                 "Object Detection",
@@ -157,6 +150,41 @@ namespace BlazorApp.Shared
                 "panorama",
                 "Stitch two overlapping photos into one panorama.",
                 new[] { "Interactive" }),
+            new SampleInfo(
+                "samples/dnn-detection",
+                "DNN Face Detection (YuNet)",
+                "DNN",
+                "neural-net",
+                "Real-time face detection and landmark localization against a live webcam feed using the YuNet ONNX model via Cv2.Dnn.",
+                new[] { "Realtime", "Webcam" }),
+            new SampleInfo(
+                "samples/super-resolution",
+                "Super Resolution (ESPCN)",
+                "DNN",
+                "upscale",
+                "Upscale a deliberately low-resolution photo 4x with ESPCN, compared against a naive bicubic resize.",
+                new[] { "Static" }),
+            new SampleInfo(
+                "samples/image-classification",
+                "Image Classification (MobileNetV2)",
+                "DNN",
+                "tag",
+                "Classify a photo against ImageNet's 1000 categories using MobileNetV2.",
+                new[] { "Static" }),
+            new SampleInfo(
+                "samples/text-detection",
+                "Text Detection (PP-OCRv3)",
+                "DNN",
+                "text-box",
+                "Detect regions of text in a photo using PP-OCRv3's DB text detector, drawing a polygon around each one.",
+                new[] { "Static" }),
+            new SampleInfo(
+                "samples/object-detection",
+                "Object Detection (YOLOX)",
+                "DNN",
+                "bounding-boxes",
+                "Detect COCO's 80 object categories in a photo using YOLOX, a single-stage anchor-free detector.",
+                new[] { "Static" }),
         };
 
         public static IEnumerable<IGrouping<string, SampleInfo>> ByCategory =>

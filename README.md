@@ -17,7 +17,6 @@ Code samples showing [OpenCvSharp](https://github.com/shimat/opencvsharp) runnin
 | `/samples/features` | AKAZE keypoint detection, plus feature matching between an image and a rotated copy of itself |
 | `/samples/template-matching` | Drag out a patch and find every place it matches elsewhere in the photo with `Cv2.MatchTemplate` |
 | `/samples/detection` | Real-time face detection against a live webcam feed using a Haar cascade classifier |
-| `/samples/dnn-detection` | Real-time face detection and landmark localization against a live webcam feed using the YuNet ONNX model via `Cv2.Dnn` |
 | `/samples/aruco` | Generates an ArUco marker and composites it onto a photo at a random position/rotation, then detects it |
 | `/samples/color-tracking` | Tunes an HSV range live and tracks the largest matching blob in the webcam feed with `Cv2.InRange` + `FindContours` |
 | `/samples/optical-flow` | Tracks corner points frame-to-frame in the webcam feed with `Cv2.CalcOpticalFlowPyrLK` |
@@ -30,6 +29,11 @@ Code samples showing [OpenCvSharp](https://github.com/shimat/opencvsharp) runnin
 | `/samples/photo-editing` | Drag-to-place `Cv2.SeamlessClone` blending compared against a naive paste, plus paint-to-remove `Cv2.Inpaint` |
 | `/samples/pyramid-blend` | Blends two photos across a seam using Laplacian pyramids instead of a hard cut |
 | `/samples/stitching` | Stitches two overlapping photos into one panorama with `Cv2.Stitcher`; stitching is a known-issue preview (see below) |
+| `/samples/dnn-detection` | Real-time face detection and landmark localization against a live webcam feed using the YuNet ONNX model via `Cv2.Dnn` |
+| `/samples/super-resolution` | Upscales a deliberately low-resolution photo 4x with ESPCN via `Cv2.DnnSuperres`, compared against a naive bicubic resize |
+| `/samples/image-classification` | Classifies a photo against ImageNet's 1000 categories using MobileNetV2 via `Cv2.Dnn.ClassificationModel` |
+| `/samples/text-detection` | Detects regions of text in a photo using PP-OCRv3's DB detector via `Cv2.Dnn.TextDetectionModelDB` |
+| `/samples/object-detection` | Detects COCO's 80 object categories in a photo using YOLOX via a raw `Cv2.Dnn.Net` and a hand-written grid/stride decode |
 
 Most photo-based samples default to a bundled test image, but accept any uploaded photo via a file picker (normalized to a fixed size, with a button to reset back to the default) - the synthetic-image samples (Document Scanner, Watershed & Hough's Hough half, ArUco) don't offer this since they need their specific generated content to demonstrate the algorithm.
 
