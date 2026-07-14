@@ -21,6 +21,11 @@
 </div>
 <p><em>@status</em></p>
 
+<AttributionFooter Entries="@(new[] {
+    new AttributionFooter.AttributionEntry("PP-OCRv3 DB model", "https://github.com/opencv/opencv_zoo/tree/main/models/text_detection_ppocr", "Apache-2.0"),
+    new AttributionFooter.AttributionEntry("Antique books photo", "https://commons.wikimedia.org/wiki/File:Antique_books_and_encyclopedias_(Unsplash).jpg", "CC0"),
+})" />
+
 @code {
     private const int CanvasSize = 736;
 
@@ -46,15 +51,22 @@
 
         resultCanvasClient ??= new CanvasClient(jsRuntime, resultCanvas);
 
-        status = "Loading model...";
-        StateHasChanged();
-        await EnsureModelLoadedAsync();
+        try
+        {
+            status = "Loading model...";
+            StateHasChanged();
+            await EnsureModelLoadedAsync();
 
-        defaultBytes = await httpClient.GetByteArrayAsync("images/AntiqueBooks.jpg");
-        srcMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize);
+            defaultBytes = await httpClient.GetByteArrayAsync("images/AntiqueBooks.jpg");
+            srcMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize);
 
-        status = "";
-        await DetectAsync();
+            status = "";
+            await DetectAsync();
+        }
+        catch (Exception ex)
+        {
+            status = $"Initialization failed: {ex.Message}";
+        }
         StateHasChanged();
     }
 
@@ -86,17 +98,16 @@
         try
         {
             using var uploaded = await ImageLoader.LoadFromFileAsync(jsRuntime, file, CanvasSize);
+            var newMat = uploaded.Clone();
             srcMat?.Dispose();
-            srcMat = uploaded.Clone();
+            srcMat = newMat;
             status = "";
+            await DetectAsync();
         }
         catch (Exception ex)
         {
             status = $"Couldn't load that image: {ex.Message}";
-            return;
         }
-
-        await DetectAsync();
     }
 
     private async Task ResetToDefaultAsync()
@@ -104,10 +115,18 @@
         if (defaultBytes is null)
             return;
 
-        srcMat?.Dispose();
-        srcMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize);
-        status = "";
-        await DetectAsync();
+        try
+        {
+            var newMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize);
+            srcMat?.Dispose();
+            srcMat = newMat;
+            status = "";
+            await DetectAsync();
+        }
+        catch (Exception ex)
+        {
+            status = $"Couldn't reset: {ex.Message}";
+        }
     }
 
     private async Task DetectAsync()

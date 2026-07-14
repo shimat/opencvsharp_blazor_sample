@@ -154,3 +154,9 @@ a, .btn-link {
     background: #eef3f8;
     color: #0071c1;
 }
+
+.attribution {
+    margin-top: 1rem;
+    font-size: 0.75rem;
+    color: #777;
+}

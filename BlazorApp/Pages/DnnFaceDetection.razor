@@ -24,6 +24,10 @@
 </div>
 <p>@statusMessage</p>
 
+<AttributionFooter Entries="@(new[] {
+    new AttributionFooter.AttributionEntry("YuNet model", "https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet", "MIT"),
+})" />
+
 @code {
     private const int FrameWidth = 480;
     private const int FrameHeight = 360;
@@ -101,6 +105,13 @@
 
         if (webcamClient is not null)
             await webcamClient.StopAsync();
+
+        if (loopTask is not null)
+            await loopTask;
+
+        cts?.Dispose();
+        cts = null;
+        loopTask = null;
     }
 
     private async Task RunLoopAsync(CancellationToken token)
@@ -111,9 +122,10 @@
             {
                 await CaptureAndDetectOnceAsync();
             }
-            catch
+            catch (Exception)
             {
                 // Ignore a transient capture/detection failure and keep the loop alive.
+                // Consider logging or a retry counter if failures persist.
             }
 
             try

@@ -21,6 +21,11 @@
 </div>
 <p><em>@status</em></p>
 
+<AttributionFooter Entries="@(new[] {
+    new AttributionFooter.AttributionEntry("MobileNetV2 model", "https://github.com/opencv/opencv_zoo/tree/main/models/image_classification_mobilenet", "Apache-2.0"),
+    new AttributionFooter.AttributionEntry("White cat photo", "https://commons.wikimedia.org/wiki/File:Green-eyed_white_cat_looking_at_camera.jpg", "CC0"),
+})" />
+
 @code {
     private const int CanvasSize = 256;
     private const int ModelInputSize = 224;
@@ -48,15 +53,22 @@
 
         srcCanvasClient ??= new CanvasClient(jsRuntime, srcCanvas);
 
-        status = "Loading model...";
-        StateHasChanged();
-        await EnsureModelLoadedAsync();
+        try
+        {
+            status = "Loading model...";
+            StateHasChanged();
+            await EnsureModelLoadedAsync();
 
-        defaultBytes = await httpClient.GetByteArrayAsync("images/WhiteCat.jpg");
-        srcMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize);
+            defaultBytes = await httpClient.GetByteArrayAsync("images/WhiteCat.jpg");
+            srcMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize);
 
-        status = "";
-        await ClassifyAsync();
+            status = "";
+            await ClassifyAsync();
+        }
+        catch (Exception ex)
+        {
+            status = $"Initialization failed: {ex.Message}";
+        }
         StateHasChanged();
     }
 
@@ -92,17 +104,16 @@
         try
         {
             using var uploaded = await ImageLoader.LoadFromFileAsync(jsRuntime, file, CanvasSize);
+            var newMat = uploaded.Clone();
             srcMat?.Dispose();
-            srcMat = uploaded.Clone();
+            srcMat = newMat;
             status = "";
+            await ClassifyAsync();
         }
         catch (Exception ex)
         {
             status = $"Couldn't load that image: {ex.Message}";
-            return;
         }
-
-        await ClassifyAsync();
     }
 
     private async Task ResetToDefaultAsync()
@@ -110,10 +121,18 @@
         if (defaultBytes is null)
             return;
 
-        srcMat?.Dispose();
-        srcMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize);
-        status = "";
-        await ClassifyAsync();
+        try
+        {
+            var newMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize);
+            srcMat?.Dispose();
+            srcMat = newMat;
+            status = "";
+            await ClassifyAsync();
+        }
+        catch (Exception ex)
+        {
+            status = $"Couldn't reset: {ex.Message}";
+        }
     }
 
     private async Task ClassifyAsync()

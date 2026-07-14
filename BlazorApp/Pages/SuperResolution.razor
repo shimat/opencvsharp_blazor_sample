@@ -35,6 +35,11 @@
 </div>
 <p><em>@status</em></p>
 
+<AttributionFooter Entries="@(new[] {
+    new AttributionFooter.AttributionEntry("ESPCN model", "https://github.com/fannymonori/TF-ESPCN", "Apache-2.0"),
+    new AttributionFooter.AttributionEntry("Scarlet Ibis photo", "https://commons.wikimedia.org/wiki/File:Posing_For_A_Shot_(221118685).jpeg", "CC0"),
+})" />
+
 @code {
     private const int LowResSize = 96;
     private const int Scale = 4;
@@ -68,15 +73,22 @@
         bicubicCanvasClient ??= new CanvasClient(jsRuntime, bicubicCanvas);
         espcnCanvasClient ??= new CanvasClient(jsRuntime, espcnCanvas);
 
-        status = "Loading model...";
-        StateHasChanged();
-        await EnsureModelLoadedAsync();
+        try
+        {
+            status = "Loading model...";
+            StateHasChanged();
+            await EnsureModelLoadedAsync();
 
-        defaultBytes = await httpClient.GetByteArrayAsync("images/ScarletIbis.jpg");
-        lowResMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, LowResSize);
+            defaultBytes = await httpClient.GetByteArrayAsync("images/ScarletIbis.jpg");
+            lowResMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, LowResSize);
 
-        status = "";
-        await RunAsync();
+            status = "";
+            await RunAsync();
+        }
+        catch (Exception ex)
+        {
+            status = $"Initialization failed: {ex.Message}";
+        }
         StateHasChanged();
     }
 
@@ -100,19 +112,19 @@
         {
             // Deliberately downscale to a small square regardless of the uploaded photo's own
             // resolution - upsampling an already-high-res photo wouldn't show anything
-            // meaningful.
+            // meaningful. Clone the replacement before disposing the current lowResMat so a
+            // load failure never leaves the field pointing at a disposed Mat.
             using var uploaded = await ImageLoader.LoadFromFileAsync(jsRuntime, file, LowResSize);
+            var newMat = uploaded.Clone();
             lowResMat?.Dispose();
-            lowResMat = uploaded.Clone();
+            lowResMat = newMat;
             status = "";
+            await RunAsync();
         }
         catch (Exception ex)
         {
             status = $"Couldn't load that image: {ex.Message}";
-            return;
         }
-
-        await RunAsync();
     }
 
     private async Task ResetToDefaultAsync()
@@ -120,11 +132,18 @@
         if (defaultBytes is null)
             return;
 
-        lowResMat?.Dispose();
-        lowResMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, LowResSize);
-
-        status = "";
-        await RunAsync();
+        try
+        {
+            var newMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, LowResSize);
+            lowResMat?.Dispose();
+            lowResMat = newMat;
+            status = "";
+            await RunAsync();
+        }
+        catch (Exception ex)
+        {
+            status = $"Couldn't reset: {ex.Message}";
+        }
     }
 
     private async Task RunAsync()
