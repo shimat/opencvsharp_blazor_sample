@@ -1,0 +1,200 @@
+@page "/samples/object-detection"
+@using OpenCvSharp
+@using OpenCvSharp.Dnn
+@using System.Runtime.InteropServices
+@inject IJSRuntime jsRuntime
+@inject HttpClient httpClient
+@implements IDisposable
+
+<PageTitle>Object Detection (YOLOX)</PageTitle>
+
+<h1>Object Detection (YOLOX)</h1>
+
+<p>
+    Detects COCO's 80 object categories in a photo using YOLOX, a single-stage anchor-free
+    detector, via a raw <code>Cv2.Dnn.Net</code> and a hand-written decode of its grid/stride
+    output (see below for why the high-level <code>DetectionModel</code> wrapper doesn't work
+    here).
+</p>
+
+<canvas @ref="resultCanvas" width="@InputSize" height="@InputSize" style="border:1px solid gray;"></canvas>
+
+<div style="margin-top:0.5rem;">
+    <PhotoPicker OnFileSelected="OnPhotoSelectedAsync" OnReset="ResetToDefaultAsync" />
+</div>
+<p><em>@status</em></p>
+
+@code {
+    private const int InputSize = 640;
+    private const int NumClasses = 80;
+    private static readonly int[] Strides = { 8, 16, 32 };
+    private const float ConfThreshold = 0.5f;
+    private const float NmsThreshold = 0.5f;
+
+    private Mat? srcMat;
+    private byte[]? defaultBytes;
+    private ElementReference resultCanvas;
+    private CanvasClient? resultCanvasClient;
+    private Net? net;
+    private string[]? labels;
+    private (int GridX, int GridY, int Stride)[]? grids;
+    private string status = "";
+
+    public void Dispose()
+    {
+        srcMat?.Dispose();
+        net?.Dispose();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        resultCanvasClient ??= new CanvasClient(jsRuntime, resultCanvas);
+        grids = GenerateGrids();
+
+        status = "Loading model...";
+        StateHasChanged();
+        await EnsureModelLoadedAsync();
+
+        defaultBytes = await httpClient.GetByteArrayAsync("images/StreetScene.jpg");
+        srcMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, InputSize);
+
+        status = "";
+        await DetectAsync();
+        StateHasChanged();
+    }
+
+    private async Task EnsureModelLoadedAsync()
+    {
+        if (net is not null)
+            return;
+
+        var labelsText = await httpClient.GetStringAsync("labels/coco80.txt");
+        labels = labelsText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        var modelBytes = await httpClient.GetByteArrayAsync("models/object_detection_yolox_2022nov.onnx");
+        net = Net.ReadNetFromONNX(modelBytes);
+    }
+
+    // YOLOX's 3 detection heads (stride 8/16/32 over a 640x640 input) are concatenated into one
+    // [8400, 85] output in a fixed order - reproducing OpenCV Zoo's own yolox.py grid generation
+    // (row-major y-then-x per stride, strides concatenated 8 -> 16 -> 32) is what makes each row
+    // of that output line up with the right grid cell below.
+    private static (int GridX, int GridY, int Stride)[] GenerateGrids()
+    {
+        var grids = new List<(int, int, int)>();
+        foreach (var stride in Strides)
+        {
+            var size = InputSize / stride;
+            for (var y = 0; y < size; y++)
+                for (var x = 0; x < size; x++)
+                    grids.Add((x, y, stride));
+        }
+        return grids.ToArray();
+    }
+
+    private async Task OnPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            using var uploaded = await ImageLoader.LoadFromFileAsync(jsRuntime, file, InputSize);
+            srcMat?.Dispose();
+            srcMat = uploaded.Clone();
+            status = "";
+        }
+        catch (Exception ex)
+        {
+            status = $"Couldn't load that image: {ex.Message}";
+            return;
+        }
+
+        await DetectAsync();
+    }
+
+    private async Task ResetToDefaultAsync()
+    {
+        if (defaultBytes is null)
+            return;
+
+        srcMat?.Dispose();
+        srcMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, InputSize);
+        status = "";
+        await DetectAsync();
+    }
+
+    private async Task DetectAsync()
+    {
+        if (srcMat is null || net is null || labels is null || grids is null)
+            return;
+
+        // OpenCV Zoo's own demo.py BGR2RGB-converts before feeding YOLOX, and its preprocess()
+        // does no mean/std normalization despite defining them - SwapRB=true, scale=1, mean=0
+        // reproduces that exactly.
+        using var blob = Cv2.Dnn.BlobFromImage(srcMat, scaleFactor: 1.0, size: new Size(InputSize, InputSize), swapRB: true);
+        net.SetInput(blob);
+        using var output = net.Forward();
+
+        var rows = grids.Length;
+        var cols = NumClasses + 5;
+        var data = new float[rows * cols];
+        Marshal.Copy(output.Data, data, 0, data.Length);
+
+        var boxes = new List<Rect>();
+        var scores = new List<float>();
+        var classIds = new List<int>();
+
+        for (var i = 0; i < rows; i++)
+        {
+            var offset = i * cols;
+            var (gridX, gridY, stride) = grids[i];
+
+            var cx = (data[offset] + gridX) * stride;
+            var cy = (data[offset + 1] + gridY) * stride;
+            var w = MathF.Exp(data[offset + 2]) * stride;
+            var h = MathF.Exp(data[offset + 3]) * stride;
+            var objectness = data[offset + 4];
+
+            var maxClassScore = 0f;
+            var maxClassId = 0;
+            for (var c = 0; c < NumClasses; c++)
+            {
+                var classScore = data[offset + 5 + c];
+                if (classScore > maxClassScore)
+                {
+                    maxClassScore = classScore;
+                    maxClassId = c;
+                }
+            }
+
+            var confidence = objectness * maxClassScore;
+            if (confidence < ConfThreshold)
+                continue;
+
+            boxes.Add(new Rect((int)(cx - w / 2), (int)(cy - h / 2), (int)w, (int)h));
+            scores.Add(confidence);
+            classIds.Add(maxClassId);
+        }
+
+        Cv2.Dnn.NMSBoxesBatched(boxes, scores, classIds, ConfThreshold, NmsThreshold, out int[] indices);
+
+        using var draw = srcMat.Clone();
+        var imageBounds = new Rect(0, 0, draw.Width, draw.Height);
+        foreach (var idx in indices)
+        {
+            var rect = boxes[idx].Intersect(imageBounds);
+            if (rect.Width <= 0 || rect.Height <= 0)
+                continue;
+
+            Cv2.Rectangle(draw, rect, Scalar.Red, thickness: 2);
+            var label = $"{labels[classIds[idx]]} {scores[idx]:P0}";
+            Cv2.PutText(draw, label, new Point(rect.X, Math.Max(12, rect.Y - 4)), HersheyFonts.HersheySimplex, 0.5, Scalar.Red, thickness: 1);
+        }
+
+        await resultCanvasClient!.DrawMatAsync(draw);
+        status = $"Found {indices.Length} object(s).";
+    }
+}

@@ -5,3 +5,5 @@
 `WhiteCat.jpg` is a CC0 photo by [Kiwiev](https://commons.wikimedia.org/wiki/User:Kiwiev) via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Green-eyed_white_cat_looking_at_camera.jpg) (own work, resized from the original), used by the Image Classification sample.
 
 `AntiqueBooks.jpg` is a CC0 photo via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Antique_books_and_encyclopedias_(Unsplash).jpg) (originally from Unsplash, resized from the original), used by the Text Detection sample.
+
+`StreetScene.jpg` is a CC0 photo via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Man_on_bike_on_road_(Unsplash).jpg) (originally from Unsplash, resized from the original), used by the Object Detection sample.
