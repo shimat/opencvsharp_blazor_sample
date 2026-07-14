@@ -1,0 +1,130 @@
+@page "/samples/image-classification"
+@using OpenCvSharp
+@using OpenCvSharp.Dnn
+@inject IJSRuntime jsRuntime
+@inject HttpClient httpClient
+@implements IDisposable
+
+<PageTitle>Image Classification (MobileNetV2)</PageTitle>
+
+<h1>Image Classification (MobileNetV2)</h1>
+
+<p>
+    Classifies a photo against ImageNet's 1000 categories using MobileNetV2, a small
+    convolutional neural network, via <code>Cv2.Dnn.ClassificationModel</code>.
+</p>
+
+<canvas @ref="srcCanvas" width="@CanvasSize" height="@CanvasSize" style="border:1px solid gray;"></canvas>
+
+<div style="margin-top:0.5rem;">
+    <PhotoPicker OnFileSelected="OnPhotoSelectedAsync" OnReset="ResetToDefaultAsync" />
+</div>
+<p><em>@status</em></p>
+
+@code {
+    private const int CanvasSize = 256;
+    private const int ModelInputSize = 224;
+
+    private Mat? srcMat;
+    private byte[]? defaultBytes;
+    private ElementReference srcCanvas;
+    private CanvasClient? srcCanvasClient;
+    private ClassificationModel? model;
+    private string[]? labels;
+    private string status = "";
+
+    public void Dispose()
+    {
+        srcMat?.Dispose();
+        model?.Dispose();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        srcCanvasClient ??= new CanvasClient(jsRuntime, srcCanvas);
+
+        status = "Loading model...";
+        StateHasChanged();
+        await EnsureModelLoadedAsync();
+
+        defaultBytes = await httpClient.GetByteArrayAsync("images/WhiteCat.jpg");
+        srcMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize);
+
+        status = "";
+        await ClassifyAsync();
+        StateHasChanged();
+    }
+
+    private async Task EnsureModelLoadedAsync()
+    {
+        if (model is not null)
+            return;
+
+        var labelsText = await httpClient.GetStringAsync("labels/imagenet1k.txt");
+        labels = labelsText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        var modelBytes = await httpClient.GetByteArrayAsync("models/image_classification_mobilenetv2_2022apr.onnx");
+        const string modelPath = "image_classification_mobilenetv2_2022apr.onnx";
+        await File.WriteAllBytesAsync(modelPath, modelBytes);
+
+        model = new ClassificationModel(modelPath, "");
+        model.SetInputSize(new Size(ModelInputSize, ModelInputSize));
+        // Standard ImageNet normalization ((pixel/255 - mean)/std), expressed as OpenCV's
+        // pixel-space mean/scale so Cv2.Dnn applies it during preprocessing instead of us doing
+        // it manually: mean_px = mean*255, scale_px = 1/(255*std). Values need SwapRB since
+        // OpenCV decodes to BGR but this model was trained on RGB-ordered ImageNet stats.
+        model.SetInputMean(new Scalar(123.675, 116.28, 103.53));
+        model.SetInputScale(new Scalar(0.0171247, 0.0175070, 0.0174291));
+        model.SetInputSwapRB(true);
+        model.SetInputCrop(true);
+        // The model's raw output is unnormalized logits, not probabilities - without this the
+        // reported "confidence" is a meaningless value that can exceed 100%.
+        model.SetEnableSoftmaxPostProcessing(true);
+    }
+
+    private async Task OnPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            using var uploaded = await ImageLoader.LoadFromFileAsync(jsRuntime, file, CanvasSize);
+            srcMat?.Dispose();
+            srcMat = uploaded.Clone();
+            status = "";
+        }
+        catch (Exception ex)
+        {
+            status = $"Couldn't load that image: {ex.Message}";
+            return;
+        }
+
+        await ClassifyAsync();
+    }
+
+    private async Task ResetToDefaultAsync()
+    {
+        if (defaultBytes is null)
+            return;
+
+        srcMat?.Dispose();
+        srcMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize);
+        status = "";
+        await ClassifyAsync();
+    }
+
+    private async Task ClassifyAsync()
+    {
+        if (srcMat is null || model is null || labels is null)
+            return;
+
+        await srcCanvasClient!.DrawMatAsync(srcMat);
+
+        model.Classify(srcMat, out var classId, out var confidence);
+        var label = classId >= 0 && classId < labels.Length ? labels[classId] : $"class #{classId}";
+        status = $"{label} ({confidence:P0} confidence)";
+    }
+}
