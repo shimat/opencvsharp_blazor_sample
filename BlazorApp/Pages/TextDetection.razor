@@ -1,0 +1,127 @@
+@page "/samples/text-detection"
+@using OpenCvSharp
+@using OpenCvSharp.Dnn
+@inject IJSRuntime jsRuntime
+@inject HttpClient httpClient
+@implements IDisposable
+
+<PageTitle>Text Detection (PP-OCRv3)</PageTitle>
+
+<h1>Text Detection (PP-OCRv3)</h1>
+
+<p>
+    Detects regions of text in a photo using PP-OCRv3's DB (Differentiable Binarization) text
+    detector via <code>Cv2.Dnn.TextDetectionModelDB</code>, drawing a polygon around each one.
+</p>
+
+<canvas @ref="resultCanvas" width="@CanvasSize" height="@CanvasSize" style="border:1px solid gray;"></canvas>
+
+<div style="margin-top:0.5rem;">
+    <PhotoPicker OnFileSelected="OnPhotoSelectedAsync" OnReset="ResetToDefaultAsync" />
+</div>
+<p><em>@status</em></p>
+
+@code {
+    private const int CanvasSize = 736;
+
+    private Mat? srcMat;
+    private byte[]? defaultBytes;
+    private ElementReference resultCanvas;
+    private CanvasClient? resultCanvasClient;
+    private TextDetectionModelDB? model;
+    private string status = "";
+
+    public void Dispose()
+    {
+        srcMat?.Dispose();
+        model?.Dispose();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!firstRender)
+            return;
+
+        resultCanvasClient ??= new CanvasClient(jsRuntime, resultCanvas);
+
+        status = "Loading model...";
+        StateHasChanged();
+        await EnsureModelLoadedAsync();
+
+        defaultBytes = await httpClient.GetByteArrayAsync("images/AntiqueBooks.jpg");
+        srcMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize);
+
+        status = "";
+        await DetectAsync();
+        StateHasChanged();
+    }
+
+    private async Task EnsureModelLoadedAsync()
+    {
+        if (model is not null)
+            return;
+
+        var modelBytes = await httpClient.GetByteArrayAsync("models/text_detection_en_ppocrv3_2023may.onnx");
+        const string modelPath = "text_detection_en_ppocrv3_2023may.onnx";
+        await File.WriteAllBytesAsync(modelPath, modelBytes);
+
+        model = new TextDetectionModelDB(modelPath, "");
+        model.SetBinaryThreshold(0.3f);
+        model.SetPolygonThreshold(0.5f);
+        model.SetUnclipRatio(2.0);
+        model.SetMaxCandidates(200);
+        model.SetInputSize(new Size(CanvasSize, CanvasSize));
+        // Matches OpenCV Zoo's own ppocr_det.py exactly, including the (unusual but
+        // intentional) lack of SwapRB - the mean/scale triple is applied directly to OpenCV's
+        // BGR channel order, not RGB.
+        model.SetInputMean(new Scalar(123.675, 116.28, 103.53));
+        model.SetInputScale(new Scalar(1.0 / 255 / 0.229, 1.0 / 255 / 0.224, 1.0 / 255 / 0.225));
+        model.SetInputSwapRB(false);
+    }
+
+    private async Task OnPhotoSelectedAsync(IBrowserFile file)
+    {
+        try
+        {
+            using var uploaded = await ImageLoader.LoadFromFileAsync(jsRuntime, file, CanvasSize);
+            srcMat?.Dispose();
+            srcMat = uploaded.Clone();
+            status = "";
+        }
+        catch (Exception ex)
+        {
+            status = $"Couldn't load that image: {ex.Message}";
+            return;
+        }
+
+        await DetectAsync();
+    }
+
+    private async Task ResetToDefaultAsync()
+    {
+        if (defaultBytes is null)
+            return;
+
+        srcMat?.Dispose();
+        srcMat = await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize);
+        status = "";
+        await DetectAsync();
+    }
+
+    private async Task DetectAsync()
+    {
+        if (srcMat is null || model is null)
+            return;
+
+        model.Detect(srcMat, out Point[][] polygons, out var confidences);
+
+        using var draw = srcMat.Clone();
+        foreach (var polygon in polygons)
+            Cv2.Polylines(draw, new[] { polygon }, isClosed: true, Scalar.Red, thickness: 4);
+
+        await resultCanvasClient!.DrawMatAsync(draw);
+        status = $"Found {polygons.Length} text region(s).";
+    }
+}
