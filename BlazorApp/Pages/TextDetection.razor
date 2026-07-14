@@ -21,6 +21,11 @@
 </div>
 <p><em>@status</em></p>
 
+<AttributionFooter Entries="@(new[] {
+    new AttributionFooter.AttributionEntry("PP-OCRv3 DB model", "https://github.com/opencv/opencv_zoo/tree/main/models/text_detection_ppocr", "Apache-2.0"),
+    new AttributionFooter.AttributionEntry("Antique books photo", "https://commons.wikimedia.org/wiki/File:Antique_books_and_encyclopedias_(Unsplash).jpg", "CC0"),
+})" />
+
 @code {
     private const int CanvasSize = 736;
 

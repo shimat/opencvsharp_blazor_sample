@@ -1,0 +1,21 @@
+@* Renders the source/license of the model(s) and default image a sample page uses - this
+   information previously only lived in wwwroot/{models,images}/README.md, which the deployed
+   app itself never links to, so nobody visiting the live demo could ever see it. *@
+@if (Entries.Length > 0)
+{
+    <p class="attribution">
+        @for (var i = 0; i < Entries.Length; i++)
+        {
+            var entry = Entries[i];
+            <a href="@entry.Url" target="_blank" rel="noopener noreferrer">@entry.Label</a>
+            @($" ({entry.License}){(i < Entries.Length - 1 ? " · " : "")}")
+        }
+    </p>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public AttributionEntry[] Entries { get; set; } = Array.Empty<AttributionEntry>();
+
+    public record AttributionEntry(string Label, string Url, string License);
+}

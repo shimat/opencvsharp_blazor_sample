@@ -24,6 +24,11 @@
 </div>
 <p><em>@status</em></p>
 
+<AttributionFooter Entries="@(new[] {
+    new AttributionFooter.AttributionEntry("YOLOX model", "https://github.com/opencv/opencv_zoo/tree/main/models/object_detection_yolox", "Apache-2.0"),
+    new AttributionFooter.AttributionEntry("Street scene photo", "https://commons.wikimedia.org/wiki/File:Man_on_bike_on_road_(Unsplash).jpg", "CC0"),
+})" />
+
 @code {
     private const int InputSize = 640;
     private const int NumClasses = 80;

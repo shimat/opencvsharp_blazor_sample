@@ -23,6 +23,10 @@
 </div>
 <p>@statusMessage</p>
 
+<AttributionFooter Entries="@(new[] {
+    new AttributionFooter.AttributionEntry("Haar cascade classifier", "https://github.com/opencv/opencv/tree/5.x/data/haarcascades", "BSD-3-Clause"),
+})" />
+
 @code {
     private const int FrameWidth = 480;
     private const int FrameHeight = 360;

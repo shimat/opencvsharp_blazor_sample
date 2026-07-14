@@ -21,6 +21,11 @@
 </div>
 <p><em>@status</em></p>
 
+<AttributionFooter Entries="@(new[] {
+    new AttributionFooter.AttributionEntry("MobileNetV2 model", "https://github.com/opencv/opencv_zoo/tree/main/models/image_classification_mobilenet", "Apache-2.0"),
+    new AttributionFooter.AttributionEntry("White cat photo", "https://commons.wikimedia.org/wiki/File:Green-eyed_white_cat_looking_at_camera.jpg", "CC0"),
+})" />
+
 @code {
     private const int CanvasSize = 256;
     private const int ModelInputSize = 224;

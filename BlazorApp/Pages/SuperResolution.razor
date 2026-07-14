@@ -35,6 +35,11 @@
 </div>
 <p><em>@status</em></p>
 
+<AttributionFooter Entries="@(new[] {
+    new AttributionFooter.AttributionEntry("ESPCN model", "https://github.com/fannymonori/TF-ESPCN", "Apache-2.0"),
+    new AttributionFooter.AttributionEntry("Scarlet Ibis photo", "https://commons.wikimedia.org/wiki/File:Posing_For_A_Shot_(221118685).jpeg", "CC0"),
+})" />
+
 @code {
     private const int LowResSize = 96;
     private const int Scale = 4;
