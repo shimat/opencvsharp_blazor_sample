@@ -12,7 +12,10 @@
     Drag a rectangle to pick a small patch of the photo as a template, then
     <code>Cv2.MatchTemplate</code> slides it across the whole image and scores how well it
     correlates at every position - the slider marks every location that scores above threshold,
-    which is how repeated textures or patterns get found automatically.
+    which is how repeated textures or patterns get found automatically. The default photo is a
+    row of near-identical antique book spines - drag around one of the plain tan spines on the
+    left, and the green boxes will light up the other look-alike spines further along the shelf
+    (distinct from your own yellow selection).
 </p>
 
 <div>
@@ -35,6 +38,10 @@
 </div>
 <p><em>@status</em></p>
 
+<AttributionFooter Entries="@(new[] {
+    new AttributionFooter.AttributionEntry("Antique books photo", "https://commons.wikimedia.org/wiki/File:Antique_books_and_encyclopedias_(Unsplash).jpg", "CC0"),
+})" />
+
 @code {
     private const int CanvasSize = 256;
 
@@ -46,7 +53,7 @@
     private bool isDragging;
     private double startX, startY, currentX, currentY;
     private Rect? templateRect;
-    private int thresholdPercent = 85;
+    private int thresholdPercent = 75;
     private string status = "Drag a rectangle around a distinctive patch to search for it.";
 
     private double RectLeft => Math.Min(startX, currentX);
@@ -64,8 +71,8 @@
             return;
 
         srcCanvasClient ??= new CanvasClient(jsRuntime, srcCanvas);
-        defaultBytes = await httpClient.GetByteArrayAsync("images/Mandrill.bmp");
-        await LoadPhotoAsync(Mat.FromImageData(defaultBytes));
+        defaultBytes = await httpClient.GetByteArrayAsync("images/BookSpines.jpg");
+        await LoadPhotoAsync(await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize));
     }
 
     private async Task OnPhotoSelectedAsync(IBrowserFile file)
@@ -86,7 +93,7 @@
         if (defaultBytes is null)
             return;
 
-        await LoadPhotoAsync(Mat.FromImageData(defaultBytes));
+        await LoadPhotoAsync(await ImageLoader.LoadFromBytesAsync(jsRuntime, defaultBytes, CanvasSize));
     }
 
     private async Task LoadPhotoAsync(Mat photo)
@@ -157,17 +164,38 @@
         mask.ConvertTo(mask8u, MatType.CV_8UC1, 255);
 
         Cv2.FindContours(mask8u, out var contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
-        var matchPositions = contours.Select(c => Cv2.BoundingRect(c)).ToList();
+        var matchRects = contours
+            .Select(c => Cv2.BoundingRect(c))
+            .Select(m => new Rect(m.X, m.Y, rect.Width, rect.Height))
+            .ToList();
+
+        // The template's own source patch always scores ~1.0, so it always "matches" itself at
+        // the exact spot you dragged - excluding that trivial hit keeps the green boxes limited
+        // to genuinely separate look-alike locations elsewhere in the photo.
+        var otherMatches = matchRects.Where(m => IntersectionOverUnion(m, rect) < 0.3).ToList();
 
         using var display = new Mat();
         srcMat.CopyTo(display);
-        foreach (var m in matchPositions)
+        foreach (var m in otherMatches)
         {
-            Cv2.Rectangle(display, new Rect(m.X, m.Y, rect.Width, rect.Height), Scalar.LimeGreen, thickness: 2);
+            Cv2.Rectangle(display, m, Scalar.LimeGreen, thickness: 2);
         }
         Cv2.Rectangle(display, rect, Scalar.Yellow, thickness: 2);
 
         await srcCanvasClient.DrawMatAsync(display);
-        status = $"Found {matchPositions.Count} match(es) at threshold {threshold:0.00} (yellow = your selection, green = matches).";
+        status = otherMatches.Count > 0
+            ? $"Found {otherMatches.Count} other match(es) at threshold {threshold:0.00} (yellow = your selection, green = other matches)."
+            : $"No other matches at threshold {threshold:0.00} - try a lower threshold, or select a patch that repeats elsewhere in the photo.";
+    }
+
+    private static double IntersectionOverUnion(Rect a, Rect b)
+    {
+        var intersection = a.Intersect(b);
+        if (intersection.Width <= 0 || intersection.Height <= 0)
+            return 0.0;
+
+        var intersectionArea = (double)intersection.Width * intersection.Height;
+        var unionArea = (double)a.Width * a.Height + (double)b.Width * b.Height - intersectionArea;
+        return intersectionArea / unionArea;
     }
 }

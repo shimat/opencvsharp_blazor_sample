@@ -6,4 +6,6 @@
 
 `AntiqueBooks.jpg` is a CC0 photo via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Antique_books_and_encyclopedias_(Unsplash).jpg) (originally from Unsplash, resized from the original), used by the Text Detection sample.
 
+`BookSpines.jpg` is a crop of `AntiqueBooks.jpg` above (same CC0 source), tightened to the row of near-identical spines so the Template Matching sample has repeated patterns to find.
+
 `StreetScene.jpg` is a CC0 photo via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Man_on_bike_on_road_(Unsplash).jpg) (originally from Unsplash, resized from the original), used by the Object Detection sample.
