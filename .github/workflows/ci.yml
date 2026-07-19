@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.3xx'
+
+      - name: Install wasm-tools workload
+        run: dotnet workload install wasm-tools
+
+      - name: Restore
+        run: dotnet restore
+
+      # Debug, not Release: Release triggers the wasm-opt version mismatch worked around in
+      # deploy-pages.yml (dotnet/runtime#114723). This job only needs to catch build breakage
+      # from dependency updates (e.g. Renovate), so Debug is enough and skips that workaround.
+      - name: Build
+        run: dotnet build --no-restore -c Debug
+
+      - name: Test
+        run: dotnet test BlazorApp.Tests/BlazorApp.Tests.csproj --no-build -c Debug
