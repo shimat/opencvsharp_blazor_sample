@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { chromium } from "playwright";
+import { verifyBuildInfo, verifySamples } from "./verify-samples.mjs";
 
 const root = resolve(process.argv[2]);
 const mimeTypes = {
@@ -37,43 +38,47 @@ server.listen(0, "127.0.0.1");
 await once(server, "listening");
 const origin = "http://127.0.0.1:" + server.address().port;
 let browser;
-const browserErrors = [];
 try {
-    browser = await chromium.launch({ channel: "chrome" });
-    console.log("Google Chrome " + browser.version());
-    const page = await browser.newPage();
-    page.on("pageerror", error => browserErrors.push(error.message));
-    page.on("console", message => {
-        if (message.type() === "error")
-            browserErrors.push(message.text());
+    browser = await chromium.launch({
+        channel: "chrome",
+        args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
     });
+    console.log("Google Chrome " + browser.version());
+    const context = await browser.newContext({ permissions: ["camera"] });
+    const home = await context.newPage();
+    await home.goto(origin);
+    await home.getByRole("heading", { name: "OpenCvSharp + Blazor WebAssembly", exact: true }).waitFor();
+    const routes = await home.locator(".sample-card").evaluateAll(cards => cards.map(card => card.getAttribute("href")));
+    assert.deepEqual(routes.toSorted(), Object.keys(verifySamples).toSorted(), "Each catalog entry needs a browser test");
 
-    await page.goto(origin + "/samples/features");
-    await page.getByRole("heading", { name: "Feature Matching", exact: true }).waitFor();
-    await waitForCanvases(page);
-    const blank = await page.locator("canvas").nth(1).evaluate(canvas => canvas.toDataURL());
-    await page.getByRole("button", { name: "Detect AKAZE keypoints" }).click();
-    await page.waitForFunction(previous => document.querySelectorAll("canvas")[1].toDataURL() !== previous, blank);
-    console.log("Feature Matching loaded directly and rendered the AKAZE result.");
-
-    await page.goto(origin + "/samples/canny-edges");
-    await page.getByRole("heading", { name: "Canny Edge Detection", exact: true }).waitFor();
-    await waitForCanvases(page);
-    console.log("Canny Edge Detection loaded directly and rendered its source and result.");
-    assert.deepEqual(browserErrors, []);
-} catch (error) {
-    for (const message of browserErrors)
-        console.error(message);
-    throw error;
+    const failures = [];
+    for (const [route, verify] of Object.entries({ "build-info": verifyBuildInfo, ...verifySamples })) {
+        const page = await context.newPage();
+        page.setDefaultTimeout(15_000);
+        const browserErrors = [];
+        page.on("pageerror", error => browserErrors.push(error.message));
+        page.on("console", message => {
+            if (message.type() === "error")
+                browserErrors.push(message.text());
+        });
+        try {
+            await page.goto(origin + "/" + route);
+            await page.locator("h1").waitFor();
+            await verify(page, root);
+            assert.equal(await page.locator("#blazor-error-ui").isVisible(), false);
+            assert.deepEqual(browserErrors, []);
+            console.log("PASS " + route);
+        } catch (error) {
+            failures.push(route);
+            console.error("FAIL " + route, error.message);
+            for (const message of browserErrors)
+                console.error(message);
+        } finally {
+            await page.close();
+        }
+    }
+    assert.deepEqual(failures, []);
 } finally {
     await browser?.close();
     server.close();
-}
-
-async function waitForCanvases(page) {
-    await page.waitForFunction(() => {
-        const [source, result] = document.querySelectorAll("canvas");
-        return [source, result].every(canvas =>
-            canvas?.getContext("2d").getImageData(20, 20, 1, 1).data[3] > 0);
-    });
 }

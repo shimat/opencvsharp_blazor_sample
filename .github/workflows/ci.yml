@@ -64,5 +64,35 @@ jobs:
         run: |
           test_dir="$RUNNER_TEMP/published-app-test"
           npm install --prefix "$test_dir" --no-save --no-package-lock playwright@1.65.1
-          cp .github/scripts/test-published-app.mjs "$test_dir/"
+          cp .github/scripts/{test-published-app,verify-samples}.mjs "$test_dir/"
           node "$test_dir/test-published-app.mjs" publish-output/wwwroot
+
+  probe-opencvsharp-aot:
+    if: github.ref_name == 'codex/blazor-net11'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet-sample
+        with:
+          dotnet-version: '11.0.100'
+
+      - name: Install wasm-tools workload
+        run: dotnet workload install wasm-tools
+
+      - name: Check whether Mono can now compile OpenCvSharp.dll itself (issue 8)
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/full-aot.log"
+          if dotnet publish BlazorApp/BlazorApp.csproj -c Release -p:AotCompileOpenCvSharp=true -o publish-full-aot 2>&1 | tee "$log"; then
+            grep -E 'OpenCvSharp\.dll -> .*\.bc' "$log"
+          else
+            grep -E 'Mono Ahead of Time compiler.*OpenCvSharp\.dll' "$log"
+            grep -E 'Assertion at .*sgen-alloc\.c' "$log"
+            echo "Issue #8 reproduced on .NET 11."
+          fi
