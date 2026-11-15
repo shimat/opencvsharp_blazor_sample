@@ -5,28 +5,13 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <WasmBuildNative>true</WasmBuildNative>
+    <RunAOTCompilation>true</RunAOTCompilation>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Without trimming, the linker sees every P/Invoke declared in OpenCvSharp.dll (including
          modules the wasm native lib doesn't build, e.g. text/dnn), not just the ones this app
          calls. Allow those to stay unresolved; they only fail if actually invoked at runtime. -->
     <WasmAllowUndefinedSymbols>true</WasmAllowUndefinedSymbols>
     <WasmInitialHeapSize>134217728</WasmInitialHeapSize>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
-    <RunAOTCompilation>True</RunAOTCompilation>
-  </PropertyGroup>
-
-  <!--
-    AOT is off for Release: excluding OpenCvSharp.dll from AOT (below, to dodge the mono-aot-cross
-    crash from issue 8) leaves any AOT-compiled component with a field typed as an OpenCvSharp type
-    (e.g. Mat) unable to load at runtime - System.TypeLoadException: Attempting to load invalid
-    type. Confirmed against the deployed GitHub Pages build; every sample page except the one with
-    no OpenCvSharp-typed fields (BuildInfo) failed to render. Filed as issue 11; re-enable once the
-    underlying partial-AOT interaction (or issue 8 itself) is fixed upstream.
-  -->
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-    <RunAOTCompilation>False</RunAOTCompilation>
   </PropertyGroup>
 
   <ItemGroup>
@@ -76,28 +61,13 @@
   </ItemGroup>
 
   <!--
-    Workaround: AOT-compiling OpenCvSharp.dll crashes mono-aot-cross (sgen-alloc.c:409) once its
-    P/Invoke surface is large (~3100 LibraryImport declarations) - confirmed via a minimal repro
-    that this is unrelated to native lib size or NativeFileReference itself (see
-    shimat/opencvsharp_blazor_sample issue 8). The actual OpenCV computation happens in native
-    C++ regardless of whether this thin C# marshalling layer is AOT'd or interpreted, so
-    excluding just this one assembly from AOT (it still ships as plain IL, executed by the
-    interpreter) dodges the crash while the rest of the app still gets AOT'd. This shadows the
-    SDK's internal "_WasmAotCompileApp" target, so its name/shape may change between SDK versions
-    - if a future SDK update breaks this, fall back to <RunAOTCompilation>False</RunAOTCompilation>
-    for Release.
+    Keep OpenCvSharp.dll in the AOT compiler's assembly list so it can resolve types such as Mat
+    when compiling BlazorApp.dll (issue #11). Use the .NET 10 SDK's interpreter metadata to skip
+    AOT code generation for OpenCvSharp.dll, which hits a Mono compiler assertion (issue #8).
   -->
-  <Target Name="ExcludeOpenCvSharpFromAOT" BeforeTargets="_WasmAotCompileApp" Condition="'$(_WasmShouldAOT)' == 'true'">
+  <Target Name="MarkOpenCvSharpForInterpretation" BeforeTargets="_WasmAotCompileApp">
     <ItemGroup>
-      <_OpenCvSharpAssemblyToSkipAOT Include="@(_WasmAssembliesInternal)" Condition="'%(FileName)' == 'OpenCvSharp'" />
-      <_WasmAssembliesInternal Remove="@(_OpenCvSharpAssemblyToSkipAOT)" />
-    </ItemGroup>
-    <Message Importance="High" Text="Excluding from AOT: @(_OpenCvSharpAssemblyToSkipAOT)" />
-  </Target>
-
-  <Target Name="ReAddOpenCvSharpAfterAOT" AfterTargets="_WasmAotCompileApp" Condition="'$(_WasmShouldAOT)' == 'true'">
-    <ItemGroup>
-      <_WasmAssembliesInternal Include="@(_OpenCvSharpAssemblyToSkipAOT)" />
+      <_WasmAssembliesInternal Condition="'%(_WasmAssembliesInternal.FileName)' == 'OpenCvSharp'" AOT_InternalForceToInterpret="true" />
     </ItemGroup>
   </Target>
 

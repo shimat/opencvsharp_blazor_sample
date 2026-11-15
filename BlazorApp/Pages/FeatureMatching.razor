@@ -160,8 +160,8 @@
         var matches = matcher.Match(descriptors1, descriptors2);
 
         // Note: Cv2.DrawMatches' P/Invoke signature crashes the Mono interpreter on this wasm
-        // build (OpenCvSharp.dll runs interpreted, not AOT-compiled - see BlazorApp.csproj's
-        // AOT-exclusion target). Filed upstream as shimat/opencvsharp#2040. Draw the side-by-side
+        // build (OpenCvSharp.dll runs interpreted via MarkOpenCvSharpForInterpretation).
+        // Filed upstream as shimat/opencvsharp#2040. Draw the side-by-side
         // comparison and correspondence lines manually instead, using only simple,
         // already-proven-safe calls (CopyTo/Line/Circle).
         var width = grayMat.Width + rotatedMat.Width;
