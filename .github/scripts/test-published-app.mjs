@@ -39,7 +39,8 @@ const origin = "http://127.0.0.1:" + server.address().port;
 let browser;
 const browserErrors = [];
 try {
-    browser = await chromium.launch();
+    browser = await chromium.launch({ channel: "chrome" });
+    console.log("Google Chrome " + browser.version());
     const page = await browser.newPage();
     page.on("pageerror", error => browserErrors.push(error.message));
     page.on("console", message => {
@@ -70,7 +71,9 @@ try {
 }
 
 async function waitForCanvases(page) {
-    await page.waitForFunction(() =>
-        Array.from(document.querySelectorAll("canvas")).slice(0, 2).filter(canvas =>
-            canvas.getContext("2d").getImageData(20, 20, 1, 1).data[3] > 0).length === 2);
+    await page.waitForFunction(() => {
+        const [source, result] = document.querySelectorAll("canvas");
+        return [source, result].every(canvas =>
+            canvas?.getContext("2d").getImageData(20, 20, 1, 1).data[3] > 0);
+    });
 }

@@ -63,10 +63,9 @@ jobs:
             exit 1
           fi
 
-      - name: Test the published app in Chromium
+      - name: Test the published app in Google Chrome
         run: |
           test_dir="$RUNNER_TEMP/published-app-test"
-          npm install --prefix "$test_dir" --no-save --no-package-lock playwright@1.58.2
-          "$test_dir/node_modules/.bin/playwright" install --with-deps chromium
+          npm install --prefix "$test_dir" --no-save --no-package-lock playwright@1.65.1
           cp .github/scripts/test-published-app.mjs "$test_dir/"
           node "$test_dir/test-published-app.mjs" publish-output/wwwroot
