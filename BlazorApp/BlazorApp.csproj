@@ -45,9 +45,19 @@
     when compiling BlazorApp.dll (issue #11). Use the SDK's interpreter metadata to skip
     AOT code generation for OpenCvSharp.dll, which hits a Mono compiler assertion (issue #8).
   -->
-  <Target Name="MarkOpenCvSharpForInterpretation" BeforeTargets="_WasmAotCompileApp" Condition="'$(AotCompileOpenCvSharp)' != 'true'">
+  <Target Name="MarkOpenCvSharpForInterpretation" BeforeTargets="_WasmAotCompileApp">
     <ItemGroup>
       <_WasmAssembliesInternal Condition="'%(_WasmAssembliesInternal.FileName)' == 'OpenCvSharp'" AOT_InternalForceToInterpret="true" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="UseExternalOpenCvSharpWasmArchive" BeforeTargets="FixOpenCvSharpWasmNativeLibName"
+          Condition="'$(OpenCvSharpWasmArchive)' != ''">
+    <Error Condition="!Exists('$(OpenCvSharpWasmArchive)')" Text="OpenCvSharp WASM archive is missing: $(OpenCvSharpWasmArchive)" />
+    <ItemGroup>
+      <_BundledOpenCvSharpWasmArchive Include="@(NativeFileReference)" Condition="'%(Filename)' == 'OpenCvSharpExtern' or '%(Filename)' == 'libOpenCvSharpExtern'" />
+      <NativeFileReference Remove="@(_BundledOpenCvSharpWasmArchive)" />
+      <NativeFileReference Include="$(OpenCvSharpWasmArchive)" />
     </ItemGroup>
   </Target>
 

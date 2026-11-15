@@ -32,7 +32,50 @@ jobs:
       - name: Test
         run: dotnet test BlazorApp.Tests/BlazorApp.Tests.csproj --no-build -c Debug
 
+  build-native-wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      OPENCVSHARP_TAG: 5.0.0.20261109
+      EMSCRIPTEN_VERSION: 6.0.2
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/cache@v6
+        id: native-archive
+        with:
+          path: wasm-native/OpenCvSharpExtern.a
+          key: opencvsharp-wasm-${{ env.OPENCVSHARP_TAG }}-emscripten-${{ env.EMSCRIPTEN_VERSION }}-${{ hashFiles('.github/scripts/build-opencvsharp-wasm.sh') }}
+
+      - uses: actions/checkout@v7
+        if: steps.native-archive.outputs.cache-hit != 'true'
+        with:
+          repository: shimat/opencvsharp
+          ref: ${{ env.OPENCVSHARP_TAG }}
+          path: opencvsharp-source
+          submodules: recursive
+          persist-credentials: false
+
+      - uses: mymindstorm/setup-emsdk@v16
+        if: steps.native-archive.outputs.cache-hit != 'true'
+        with:
+          version: ${{ env.EMSCRIPTEN_VERSION }}
+
+      - name: Build OpenCvSharp's native WASM archive
+        if: steps.native-archive.outputs.cache-hit != 'true'
+        run: bash .github/scripts/build-opencvsharp-wasm.sh opencvsharp-source wasm-native
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: opencvsharp-wasm
+          path: wasm-native/OpenCvSharpExtern.a
+          if-no-files-found: error
+          retention-days: 3
+
   release-wasm:
+    needs: build-native-wasm
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -49,11 +92,17 @@ jobs:
       - name: Install wasm-tools workload
         run: dotnet workload install wasm-tools
 
+      - uses: actions/download-artifact@v7
+        with:
+          name: opencvsharp-wasm
+          path: wasm-native
+
       - name: Publish Release with partial AOT
         shell: bash
         run: |
           dotnet --version
-          dotnet publish BlazorApp/BlazorApp.csproj -c Release -o publish-output | tee "$RUNNER_TEMP/publish.log"
+          dotnet publish BlazorApp/BlazorApp.csproj -c Release -o publish-output \
+            -p:OpenCvSharpWasmArchive="$GITHUB_WORKSPACE/wasm-native/OpenCvSharpExtern.a" | tee "$RUNNER_TEMP/publish.log"
           grep -E 'BlazorApp\.dll -> .*\.bc' "$RUNNER_TEMP/publish.log"
           if grep -E 'OpenCvSharp\.dll -> .*\.bc' "$RUNNER_TEMP/publish.log"; then
             echo "OpenCvSharp.dll must run in the interpreter" >&2
@@ -66,33 +115,3 @@ jobs:
           npm install --prefix "$test_dir" --no-save --no-package-lock playwright@1.65.1
           cp .github/scripts/{test-published-app,verify-samples}.mjs "$test_dir/"
           node "$test_dir/test-published-app.mjs" publish-output/wwwroot
-
-  probe-opencvsharp-aot:
-    if: github.ref_name == 'codex/blazor-net11'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-dotnet@v6
-        env:
-          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet-sample
-        with:
-          dotnet-version: '11.0.100'
-
-      - name: Install wasm-tools workload
-        run: dotnet workload install wasm-tools
-
-      - name: Check whether Mono can now compile OpenCvSharp.dll itself (issue 8)
-        shell: bash
-        run: |
-          log="$RUNNER_TEMP/full-aot.log"
-          if dotnet publish BlazorApp/BlazorApp.csproj -c Release -p:AotCompileOpenCvSharp=true -o publish-full-aot 2>&1 | tee "$log"; then
-            grep -E 'OpenCvSharp\.dll -> .*\.bc' "$log"
-          else
-            grep -E 'Mono Ahead of Time compiler.*OpenCvSharp\.dll' "$log"
-            grep -E 'Assertion at .*sgen-alloc\.c' "$log"
-            echo "Issue #8 reproduced on .NET 11."
-          fi

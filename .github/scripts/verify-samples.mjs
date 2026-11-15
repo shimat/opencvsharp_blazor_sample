@@ -8,8 +8,10 @@ export const verifySamples = {
         await changeCanvas(page, 0, () => click(page, "Reset to default"));
     },
     "samples/threshold": async page => {
+        const auto = page.getByRole("checkbox", { name: "Auto (Otsu)" });
+        await auto.uncheck();
         await changeCanvas(page, 1, () => slider(page, 0, 64));
-        await changeCanvas(page, 1, () => page.getByRole("checkbox", { name: "Auto (Otsu)" }).check());
+        await changeCanvas(page, 1, () => auto.check());
     },
     "samples/canny-edges": page => changeCanvas(page, 1, () => slider(page, 1, 224)),
     "samples/frequency-filter": async page => {
@@ -66,11 +68,15 @@ export const verifySamples = {
         await changeCanvas(page, 3, () => click(page, "Remove painted area"));
     },
     "samples/pyramid-blend": page => changeCanvas(page, 1, () => slider(page, 0, 78)),
-    "samples/stitching": async page => {
+    "samples/stitching": async (page, root) => {
         await pixels(page, [0, 1, 2]);
-        // Exercise the native code behind the disabled preview to check issue #12 on .NET 11.
-        await page.getByRole("button", { name: "Stitch", exact: true }).evaluate(button => { button.disabled = false; });
-        await click(page, "Stitch");
+        const photos = page.locator('input[type="file"]');
+        const reset = page.getByRole("button", { name: "Reset to default", exact: true });
+        for (const index of [0, 1]) {
+            await changeCanvas(page, index, () => photos.nth(index).setInputFiles(join(root, "images", "WhiteCat.jpg")));
+            await changeCanvas(page, index, () => reset.nth(index).click());
+        }
+        await changeCanvas(page, 2, () => click(page, "Stitch"));
         await page.getByText("Stitched successfully.").waitFor();
     },
     "samples/dnn-detection": verifyCamera,
