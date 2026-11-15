@@ -15,6 +15,8 @@ jobs:
           persist-credentials: false
 
       - uses: actions/setup-dotnet@v6
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet-sample
         with:
           dotnet-version: '10.0.404'
 
@@ -24,11 +26,46 @@ jobs:
       - name: Restore
         run: dotnet restore
 
-      # Debug, not Release: Release triggers the wasm-opt version mismatch worked around in
-      # deploy-pages.yml (dotnet/runtime#114723). This job only needs to catch build breakage
-      # from dependency updates (e.g. Renovate), so Debug is enough and skips that workaround.
       - name: Build
         run: dotnet build --no-restore -c Debug
 
       - name: Test
         run: dotnet test BlazorApp.Tests/BlazorApp.Tests.csproj --no-build -c Debug
+
+  release-wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet-sample
+        with:
+          dotnet-version: '10.0.404'
+
+      - name: Install wasm-tools workload
+        run: dotnet workload install wasm-tools
+
+      - name: Work around outdated bundled wasm-opt (dotnet/runtime#114723)
+        run: bash .github/scripts/update-wasm-opt.sh
+
+      - name: Publish Release with partial AOT
+        shell: bash
+        run: |
+          dotnet --version
+          dotnet publish BlazorApp/BlazorApp.csproj -c Release -o publish-output | tee "$RUNNER_TEMP/publish.log"
+          grep -E 'BlazorApp\.dll -> .*\.bc' "$RUNNER_TEMP/publish.log"
+          if grep -E 'OpenCvSharp\.dll -> .*\.bc' "$RUNNER_TEMP/publish.log"; then
+            echo "OpenCvSharp.dll must run in the interpreter" >&2
+            exit 1
+          fi
+
+      - name: Test the published app in Google Chrome
+        run: |
+          test_dir="$RUNNER_TEMP/published-app-test"
+          npm install --prefix "$test_dir" --no-save --no-package-lock playwright@1.65.1
+          cp .github/scripts/test-published-app.mjs "$test_dir/"
+          node "$test_dir/test-published-app.mjs" publish-output/wwwroot
