@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <WasmBuildNative>true</WasmBuildNative>
@@ -41,28 +41,8 @@
   </Target>
 
   <!--
-    The wasm-opt bundled with the current wasm-tools workload (v117) predates binaryen PR 7106
-    (bulk-memory-opt / call-indirect-overlong, added in v121) - see dotnet/runtime issue 114723.
-    emcc's own internal link-time wasm-opt pass enables the full modern feature set and produces
-    opcodes (e.g. nontrapping-float-to-int from libwebp) that this second, SDK-driven wasm-opt
-    pass then rejects because its flag set doesn't match. This only matters once wasm-opt itself
-    is new enough to accept the newer enable flags (see the CI publish workflow, which swaps in
-    a newer build); harmless otherwise since Debug builds don't invoke this optimization pass.
-  -->
-  <ItemGroup Condition="'$(WasmBuildNative)' == 'true'">
-    <WasmOptConfigurationFlags Include="--enable-nontrapping-float-to-int" />
-    <WasmOptConfigurationFlags Include="--enable-bulk-memory-opt" />
-    <WasmOptConfigurationFlags Include="--enable-call-indirect-overlong" />
-    <WasmOptConfigurationFlags Include="--enable-multivalue" />
-    <WasmOptConfigurationFlags Include="--enable-mutable-globals" />
-    <WasmOptConfigurationFlags Include="--enable-reference-types" />
-    <WasmOptConfigurationFlags Include="--enable-sign-ext" />
-    <WasmOptConfigurationFlags Include="--enable-threads" />
-  </ItemGroup>
-
-  <!--
     Keep OpenCvSharp.dll in the AOT compiler's assembly list so it can resolve types such as Mat
-    when compiling BlazorApp.dll (issue #11). Use the .NET 10 SDK's interpreter metadata to skip
+    when compiling BlazorApp.dll (issue #11). Use the SDK's interpreter metadata to skip
     AOT code generation for OpenCvSharp.dll, which hits a Mono compiler assertion (issue #8).
   -->
   <Target Name="MarkOpenCvSharpForInterpretation" BeforeTargets="_WasmAotCompileApp">
