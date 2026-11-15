@@ -1,12 +1,8 @@
+import assert from "node:assert/strict";
 import { join } from "node:path";
 
 export const verifySamples = {
-    "samples/pseudo-color": async (page, root) => {
-        await changeCanvas(page, 1, () => page.locator("select").selectOption({ label: "Hot" }));
-        const photo = page.locator('input[type="file"]');
-        await changeCanvas(page, 0, () => photo.setInputFiles(join(root, "images", "WhiteCat.jpg")));
-        await changeCanvas(page, 0, () => click(page, "Reset to default"));
-    },
+    "samples/pseudo-color": page => changeCanvas(page, 1, () => page.locator("select").selectOption({ label: "Hot" })),
     "samples/threshold": async page => {
         const auto = page.getByRole("checkbox", { name: "Auto (Otsu)" });
         await auto.uncheck();
@@ -31,7 +27,7 @@ export const verifySamples = {
     },
     "samples/detection": verifyCamera,
     "samples/aruco": async page => {
-        await pixels(page, [0]);
+        await changeCanvas(page, 0, () => click(page, "Regenerate photo"));
         await click(page, "Detect");
         await page.getByText(/Detected marker ID \d+/).waitFor();
         await pixels(page, [1]);
@@ -68,14 +64,8 @@ export const verifySamples = {
         await changeCanvas(page, 3, () => click(page, "Remove painted area"));
     },
     "samples/pyramid-blend": page => changeCanvas(page, 1, () => slider(page, 0, 78)),
-    "samples/stitching": async (page, root) => {
+    "samples/stitching": async page => {
         await pixels(page, [0, 1, 2]);
-        const photos = page.locator('input[type="file"]');
-        const reset = page.getByRole("button", { name: "Reset to default", exact: true });
-        for (const index of [0, 1]) {
-            await changeCanvas(page, index, () => photos.nth(index).setInputFiles(join(root, "images", "WhiteCat.jpg")));
-            await changeCanvas(page, index, () => reset.nth(index).click());
-        }
         await changeCanvas(page, 2, () => click(page, "Stitch"));
         await page.getByText("Stitched successfully.").waitFor();
     },
@@ -94,6 +84,38 @@ export const verifySamples = {
         await page.locator("em").filter({ hasText: /Found [1-9]\d* object/ }).waitFor();
     },
 };
+
+const photoCanvases = {
+    "samples/pseudo-color": [1],
+    "samples/threshold": [1],
+    "samples/canny-edges": [1],
+    "samples/frequency-filter": [2],
+    "samples/features": [0],
+    "samples/template-matching": [0],
+    "samples/interactive": [0],
+    "samples/watershed-hough": [1],
+    "samples/photo-editing": [1],
+    "samples/pyramid-blend": [1, 1],
+    "samples/stitching": [0, 1],
+    "samples/super-resolution": [2],
+    "samples/image-classification": [0],
+    "samples/text-detection": [0],
+    "samples/object-detection": [0],
+};
+
+export async function verifyPhotoPickers(page, root, route) {
+    const photos = page.locator('input[type="file"]');
+    const resets = page.getByRole("button", { name: "Reset to default", exact: true });
+    const canvasIndexes = photoCanvases[route] ?? [];
+    assert.equal(await photos.count(), canvasIndexes.length);
+    assert.equal(await resets.count(), canvasIndexes.length);
+
+    for (const [index, canvas] of canvasIndexes.entries()) {
+        const photo = join(root, "images", "Pizza.jpg");
+        await changeCanvas(page, canvas, () => photos.nth(index).setInputFiles(photo));
+        await changeCanvas(page, canvas, () => resets.nth(index).click());
+    }
+}
 
 export function verifyBuildInfo(page) {
     return page.locator("pre").filter({ hasText: "General configuration for OpenCV" }).waitFor();
@@ -144,6 +166,7 @@ async function changeCanvas(page, index, act) {
     await act?.();
     await page.waitForFunction(({ index, before }) => {
         const canvases = [...document.querySelectorAll("canvas")].filter(canvas => canvas.getClientRects().length);
-        return canvases[index]?.toDataURL() !== before;
+        const canvas = canvases[index];
+        return canvas && canvas.toDataURL() !== before;
     }, { index, before });
 }

@@ -28,7 +28,7 @@ Code samples showing [OpenCvSharp](https://github.com/shimat/opencvsharp) runnin
 | `/samples/document-scanner` | Auto-detects a tilted document's corners with `FindContours`/`ApproxPolyDP`, then straightens it with a perspective warp after manual correction |
 | `/samples/photo-editing` | Drag-to-place `Cv2.SeamlessClone` blending compared against a naive paste, plus paint-to-remove `Cv2.Inpaint` |
 | `/samples/pyramid-blend` | Blends two photos across a seam using Laplacian pyramids instead of a hard cut |
-| `/samples/stitching` | Stitches two overlapping photos into one panorama with `Cv2.Stitcher`; stitching is a known-issue preview (see below) |
+| `/samples/stitching` | Stitches two overlapping photos into one panorama with `Cv2.Stitcher` |
 | `/samples/dnn-detection` | Real-time face detection and landmark localization against a live webcam feed using the YuNet ONNX model via `Cv2.Dnn` |
 | `/samples/super-resolution` | Upscales a deliberately low-resolution photo 4x with ESPCN via `Cv2.DnnSuperres`, compared against a naive bicubic resize |
 | `/samples/image-classification` | Classifies a photo against ImageNet's 1000 categories using MobileNetV2 via `Cv2.Dnn.ClassificationModel` |
@@ -39,7 +39,7 @@ Most photo-based samples default to a bundled test image, but accept any uploade
 
 ## Stack
 
-- .NET 10 / Blazor WebAssembly
+- .NET 11 / Blazor WebAssembly
 - [OpenCvSharp5](https://www.nuget.org/packages/OpenCvSharp5) + [OpenCvSharp5.runtime.wasm](https://www.nuget.org/packages/OpenCvSharp5.runtime.wasm)
 
 ## Assets
@@ -48,11 +48,11 @@ Bundled test images and DNN models are third-party assets, not original work —
 
 ## Running locally
 
-Requires the .NET 10 SDK and the `wasm-tools` workload:
+Requires the .NET 11 SDK, the `wasm-tools` workload, and an `OpenCvSharpExtern.a` built with Emscripten 6.0.2. The Release CI job builds that archive using the corresponding OpenCvSharp release source.
 
 ```sh
 dotnet workload install wasm-tools
-dotnet run --project BlazorApp
+dotnet run --project BlazorApp -p:OpenCvSharpWasmArchive=/path/to/OpenCvSharpExtern.a
 ```
 
 Then open the URL printed in the console (typically `http://localhost:5089`).
@@ -65,12 +65,11 @@ Pushing to `main` publishes and deploys the app to GitHub Pages via [`.github/wo
 
 The current wasm-tools toolchain has a couple of rough edges around statically linking a large native library (like OpenCV) into a Blazor WebAssembly app. `BlazorApp.csproj` and the deploy workflow carry documented workarounds for:
 
-- AOT-compiling `OpenCvSharp.dll` crashes the Mono AOT compiler ([#8](https://github.com/shimat/opencvsharp_blazor_sample/issues/8)). Release publish uses the .NET 10 SDK's interpreter metadata so the AOT compiler can resolve OpenCvSharp types in app components ([#11](https://github.com/shimat/opencvsharp_blazor_sample/issues/11)). CI runs the Release output in Google Chrome and checks that Feature Matching can render the AKAZE result.
-- The bundled `wasm-opt` predates some binaryen features Release publish needs ([dotnet/runtime#114723](https://github.com/dotnet/runtime/issues/114723)) — worked around by swapping in a newer build during CI publish
+- AOT-compiling `OpenCvSharp.dll` crashes the Mono AOT compiler ([#8](https://github.com/shimat/opencvsharp_blazor_sample/issues/8)). Release publish uses the SDK's interpreter metadata so the AOT compiler can resolve OpenCvSharp types in app components ([#11](https://github.com/shimat/opencvsharp_blazor_sample/issues/11)). CI exercises the published samples in Google Chrome, including AKAZE and feature matching.
 - `OpenCvSharp5.runtime.wasm` ships its native lib as `libOpenCvSharpExtern.a`, but the managed side declares `[LibraryImport("OpenCvSharpExtern")]` (no `lib` prefix); the wasm toolchain derives the P/Invoke module name from the file name verbatim, so this mismatch leaves the P/Invoke table empty ([opencvsharp#2039](https://github.com/shimat/opencvsharp/issues/2039)) — worked around by re-referencing a locally renamed copy of the `.a` file before native build
 - `cv::ocl::haveOpenCL()` used to throw instead of returning `false` on this wasm build, hanging or hard-aborting any algorithm that internally allocates a `cv::UMat` (e.g. `ORB`, `CascadeClassifier.DetectMultiScale`, `Aruco.ArucoDetector.DetectMarkers`, `Cv2.Stitcher.Stitch`) ([opencvsharp#2037](https://github.com/shimat/opencvsharp/issues/2037)) — fixed upstream in [opencvsharp#2041](https://github.com/shimat/opencvsharp/pull/2041), confirmed resolved as of `OpenCvSharp5`/`OpenCvSharp5.runtime.wasm` `5.0.0.20260712`
 - `Cv2.DrawMatches`' P/Invoke signature crashes the Mono interpreter ([opencvsharp#2040](https://github.com/shimat/opencvsharp/issues/2040)) — the `/samples/features` page works around this by drawing match correspondence lines manually instead of calling `Cv2.DrawMatches`
 - `Cv2.Aruco.DrawDetectedMarkers` crashes with "memory access out of bounds" inside `cv::FontFace` (likely missing freetype/font support in this build) — the `/samples/aruco` page works around this by drawing each marker's outline and corner manually instead
-- `Cv2.Stitcher.Stitch` aborts this wasm build with a `cv::gemm` assertion failure deep in the bundle adjustment step, followed by an unrecoverable WASM trap ([opencvsharp_blazor_sample#12](https://github.com/shimat/opencvsharp_blazor_sample/issues/12), not yet root-caused as a core OpenCV bug vs. a usage issue) — the `/samples/stitching` page keeps its "Stitch" button disabled and documents this inline
+- Bundle adjustment in `Cv2.Stitcher.Stitch` can trap in `cv::gemm` on WebAssembly. The panorama sample uses the initial camera estimates and skips bundle adjustment to work around [#12](https://github.com/shimat/opencvsharp_blazor_sample/issues/12).
 - Without trimming, the wasm linker sees every P/Invoke declared in `OpenCvSharp.dll`, including modules the wasm native lib doesn't build (e.g. `text`, `dnn`), not just the ones this app calls — worked around by `WasmAllowUndefinedSymbols` in `BlazorApp.csproj`, letting those stay unresolved unless actually invoked at runtime
 - `FaceDetectorYN.Create` emits a `CV_LOG_WARNING` (about targets not supported by the new graph engine) that trips Blazor's global unhandled-error banner even though the app keeps running correctly underneath — worked around by raising the log threshold with `Cv2.SetLogLevel(OpenCvSharp.LogLevel.ERROR)` in `Program.cs`

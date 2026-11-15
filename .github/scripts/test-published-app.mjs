@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { chromium } from "playwright";
-import { verifyBuildInfo, verifySamples } from "./verify-samples.mjs";
+import { verifyBuildInfo, verifyPhotoPickers, verifySamples } from "./verify-samples.mjs";
 
 const root = resolve(process.argv[2]);
 const mimeTypes = {
@@ -64,7 +64,8 @@ try {
         try {
             await page.goto(origin + "/" + route);
             await page.locator("h1").waitFor();
-            await verify(page, root);
+            await verify(page);
+            await verifyPhotoPickers(page, root, route);
             assert.equal(await page.locator("#blazor-error-ui").isVisible(), false);
             assert.deepEqual(browserErrors, []);
             console.log("PASS " + route);

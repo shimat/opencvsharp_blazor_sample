@@ -102,8 +102,12 @@ jobs:
         run: |
           dotnet --version
           dotnet publish BlazorApp/BlazorApp.csproj -c Release -o publish-output \
-            -p:OpenCvSharpWasmArchive="$GITHUB_WORKSPACE/wasm-native/OpenCvSharpExtern.a" | tee "$RUNNER_TEMP/publish.log"
+            -p:OpenCvSharpWasmArchive="$GITHUB_WORKSPACE/wasm-native/OpenCvSharpExtern.a" 2>&1 | tee "$RUNNER_TEMP/publish.log"
           grep -E 'BlazorApp\.dll -> .*\.bc' "$RUNNER_TEMP/publish.log"
+          if grep -E 'undefined symbol: (saveSetjmp|testSetjmp)' "$RUNNER_TEMP/publish.log"; then
+            echo "OpenCvSharpExtern.a refers to legacy Emscripten setjmp helpers" >&2
+            exit 1
+          fi
           if grep -E 'OpenCvSharp\.dll -> .*\.bc' "$RUNNER_TEMP/publish.log"; then
             echo "OpenCvSharp.dll must run in the interpreter" >&2
             exit 1
