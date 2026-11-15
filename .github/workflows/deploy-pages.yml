@@ -22,13 +22,10 @@ jobs:
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet-sample
         with:
-          dotnet-version: '10.0.404'
+          dotnet-version: '11.0.100'
 
       - name: Install wasm-tools workload
         run: dotnet workload install wasm-tools
-
-      - name: Work around outdated bundled wasm-opt (dotnet/runtime#114723)
-        run: bash .github/scripts/update-wasm-opt.sh
 
       - name: Publish
         run: dotnet publish BlazorApp/BlazorApp.csproj -c Release -o publish-output

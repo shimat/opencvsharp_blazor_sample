@@ -18,7 +18,7 @@ jobs:
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet-sample
         with:
-          dotnet-version: '10.0.404'
+          dotnet-version: '11.0.100'
 
       - name: Install wasm-tools workload
         run: dotnet workload install wasm-tools
@@ -44,20 +44,25 @@ jobs:
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet-sample
         with:
-          dotnet-version: '10.0.404'
+          dotnet-version: '11.0.100'
 
       - name: Install wasm-tools workload
         run: dotnet workload install wasm-tools
-
-      - name: Work around outdated bundled wasm-opt (dotnet/runtime#114723)
-        run: bash .github/scripts/update-wasm-opt.sh
 
       - name: Publish Release with partial AOT
         shell: bash
         run: |
           dotnet --version
-          dotnet publish BlazorApp/BlazorApp.csproj -c Release -o publish-output | tee "$RUNNER_TEMP/publish.log"
+          project=BlazorApp/BlazorApp.csproj
+          dotnet restore "$project" --source https://api.nuget.org/v3/index.json
+          dotnet msbuild "$project" -getItem:NativeFileReference |
+            jq -er '.Items.NativeFileReference | select(length == 1) | .[0].FullPath | select(endswith("/runtimes/browser-wasm/6.0.2/OpenCvSharpExtern.a"))'
+          dotnet publish "$project" --no-restore -c Release -o publish-output 2>&1 | tee "$RUNNER_TEMP/publish.log"
           grep -E 'BlazorApp\.dll -> .*\.bc' "$RUNNER_TEMP/publish.log"
+          if grep -E 'undefined symbol: (saveSetjmp|testSetjmp)' "$RUNNER_TEMP/publish.log"; then
+            echo "OpenCvSharpExtern.a refers to legacy Emscripten setjmp helpers" >&2
+            exit 1
+          fi
           if grep -E 'OpenCvSharp\.dll -> .*\.bc' "$RUNNER_TEMP/publish.log"; then
             echo "OpenCvSharp.dll must run in the interpreter" >&2
             exit 1
@@ -67,5 +72,5 @@ jobs:
         run: |
           test_dir="$RUNNER_TEMP/published-app-test"
           npm install --prefix "$test_dir" --no-save --no-package-lock playwright@1.65.1
-          cp .github/scripts/test-published-app.mjs "$test_dir/"
+          cp .github/scripts/{test-published-app,verify-samples}.mjs "$test_dir/"
           node "$test_dir/test-published-app.mjs" publish-output/wwwroot
