@@ -1,5 +1,6 @@
 @page "/samples/stitching"
 @using OpenCvSharp
+@using OpenCvSharp.Detail
 @inject IJSRuntime jsRuntime
 @inject HttpClient httpClient
 @implements IDisposable
@@ -14,6 +15,12 @@
     panorama - the default pair below is two overlapping crops of the same photo, standing in for
     two photos taken side by side. Replace either with your own overlapping photos to try it for
     real.
+</p>
+
+<p>
+    This WebAssembly sample uses OpenCV's initial camera estimates for alignment. It skips the
+    optional bundle adjustment step, which can trap on WebAssembly
+    (<a href="https://github.com/shimat/opencvsharp_blazor_sample/issues/12" target="_blank">issue #12</a>).
 </p>
 
 <div style="display:flex; gap:1.5rem; flex-wrap:wrap;">
@@ -165,7 +172,9 @@
         {
             await Task.Yield();
 
+            using var adjuster = new NoBundleAdjuster();
             using var stitcher = Stitcher.Create(Stitcher.Mode.Panorama);
+            stitcher.SetBundleAdjuster(adjuster);
             using var pano = new Mat();
             var result = stitcher.Stitch(new[] { leftMat, rightMat }, pano);
 
