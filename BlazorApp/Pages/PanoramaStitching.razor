@@ -1,5 +1,6 @@
 @page "/samples/stitching"
 @using OpenCvSharp
+@using OpenCvSharp.Detail
 @inject IJSRuntime jsRuntime
 @inject HttpClient httpClient
 @implements IDisposable
@@ -16,14 +17,11 @@
     real.
 </p>
 
-<div style="border:1px solid #e0a800; background:#fff3cd; color:#664d03; padding:0.75rem 1rem; border-radius:4px; margin-bottom:1rem;">
-    <strong>Known issue:</strong> <code>Cv2.Stitcher.Stitch</code> currently aborts this
-    WebAssembly build with a <code>cv::gemm</code> assertion failure deep in the bundle adjustment
-    step, immediately followed by an unrecoverable WASM trap (see
-    <a href="https://github.com/shimat/opencvsharp_blazor_sample/issues/12" target="_blank">opencvsharp_blazor_sample#12</a>).
-    Loading and previewing the source photos works fine - only the "Stitch" button is affected, so
-    it's disabled below pending that issue being resolved.
-</div>
+<p>
+    This WebAssembly sample uses OpenCV's initial camera estimates for alignment. It skips the
+    optional bundle adjustment step, which can trap on WebAssembly
+    (<a href="https://github.com/shimat/opencvsharp_blazor_sample/issues/12" target="_blank">issue #12</a>).
+</p>
 
 <div style="display:flex; gap:1.5rem; flex-wrap:wrap;">
     <div>
@@ -39,7 +37,7 @@
 </div>
 
 <div>
-    <button @onclick="StitchAsync" disabled title="Disabled - see the known issue above">Stitch</button>
+    <button @onclick="StitchAsync" disabled="@stitching">Stitch</button>
 </div>
 <p><em>@status</em></p>
 
@@ -62,6 +60,7 @@
     private CanvasClient? rightCanvasClient;
     private CanvasClient? resultCanvasClient;
     private string status = "";
+    private bool stitching;
 
     public void Dispose()
     {
@@ -106,7 +105,8 @@
             leftMat?.Dispose();
             leftMat = newMat;
             status = "";
-            await leftCanvasClient!.DrawMatAsync(leftMat);
+            using var preview = FitToBox(leftMat, LeftWidth, CanvasSize);
+            await leftCanvasClient!.DrawMatAsync(preview);
         }
         catch (Exception ex)
         {
@@ -122,7 +122,8 @@
             rightMat?.Dispose();
             rightMat = newMat;
             status = "";
-            await rightCanvasClient!.DrawMatAsync(rightMat);
+            using var preview = FitToBox(rightMat, RightWidth, CanvasSize);
+            await rightCanvasClient!.DrawMatAsync(preview);
         }
         catch (Exception ex)
         {
@@ -160,27 +161,38 @@
 
     private async Task StitchAsync()
     {
-        if (leftMat is null || rightMat is null || resultCanvasClient is null)
+        if (stitching || leftMat is null || rightMat is null || resultCanvasClient is null)
             return;
 
+        stitching = true;
         status = "Stitching...";
         StateHasChanged();
-        await Task.Yield();
 
-        using var stitcher = Stitcher.Create(Stitcher.Mode.Panorama);
-        using var pano = new Mat();
-        var result = stitcher.Stitch(new[] { leftMat, rightMat }, pano);
-
-        if (result == Stitcher.Status.OK && !pano.Empty())
+        try
         {
-            using var fitted = FitToBox(pano, ResultWidth, ResultHeight);
-            await resultCanvasClient.DrawMatAsync(fitted);
-            status = "Stitched successfully.";
+            await Task.Yield();
+
+            using var adjuster = new NoBundleAdjuster();
+            using var stitcher = Stitcher.Create(Stitcher.Mode.Panorama);
+            stitcher.SetBundleAdjuster(adjuster);
+            using var pano = new Mat();
+            var result = stitcher.Stitch(new[] { leftMat, rightMat }, pano);
+
+            if (result == Stitcher.Status.OK && !pano.Empty())
+            {
+                using var fitted = FitToBox(pano, ResultWidth, ResultHeight);
+                await resultCanvasClient.DrawMatAsync(fitted);
+                status = "Stitched successfully.";
+            }
+            else
+            {
+                status = $"Stitching failed: {result}";
+                await ClearResultAsync();
+            }
         }
-        else
+        finally
         {
-            status = $"Stitching failed: {result}";
-            await ClearResultAsync();
+            stitching = false;
         }
     }
 

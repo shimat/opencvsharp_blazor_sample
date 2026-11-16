@@ -97,8 +97,8 @@
         if (superRes is not null)
             return;
 
-        var modelBytes = await httpClient.GetByteArrayAsync("models/ESPCN_x4.pb");
-        const string modelPath = "ESPCN_x4.pb";
+        const string modelPath = "ESPCN_x4.onnx";
+        var modelBytes = await httpClient.GetByteArrayAsync($"models/{modelPath}");
         await File.WriteAllBytesAsync(modelPath, modelBytes);
 
         superRes = new DnnSuperResImpl();
